@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (可視化サイト導入後)
+node_modules/
+dist/
+
+# Claude Code (個人設定はコミットしない)
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store

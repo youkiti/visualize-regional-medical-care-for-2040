@@ -1,0 +1,14 @@
+name: verify-data
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    name: 生データの完全性検証
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: sha256sum -c SHA256SUMS
+        run: sha256sum -c SHA256SUMS

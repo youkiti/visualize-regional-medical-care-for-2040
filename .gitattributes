@@ -1,0 +1,9 @@
+* text=auto
+
+# sha256sum -c は CRLF だと失敗するため LF 固定(クラウド=Ubuntu で検証する前提)
+SHA256SUMS text eol=lf
+*.sh text eol=lf
+
+*.xlsx binary
+*.pdf binary
+*.zip binary
