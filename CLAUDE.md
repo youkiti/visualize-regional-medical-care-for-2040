@@ -39,6 +39,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 座標系はいずれも JGD2011 地理座標（EPSG:6668）。zip内にシェープファイル・GeoJSON・GML(XML) を同梱（A38 は `_1`=一次、`_2`=二次、`_3`=三次医療圏）。
 - 二次医療圏コード `A38b_003` はゼロ埋め4桁文字列（例 `"0101"`）で需要推計ファイルと同形式。病床系ファイルの数値コードとは下記「結合キーの罠」の正規化が必要。
 - A38 は令和2年度時点の二次医療圏。R7 の339構想区域と区割りが一致しない可能性があるため突合時に検証する。
+- 可視化用の軽量二次医療圏GeoJSON（`data/processed/iryoken2_A38-20.geojson`、335医療圏・約6.7MB・表示専用）は `python tools/build_iryoken2_geojson.py` で再生成できる（要 Node.js、mapshaper を npx で取得。実行時に元zipのSHA-256を検証）。由来メタデータはファイル内 `metadata` に埋め込み済み。
 
 ### パース時の注意（帳票形式のExcel）
 

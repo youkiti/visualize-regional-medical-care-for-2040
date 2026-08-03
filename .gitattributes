@@ -4,6 +4,9 @@
 SHA256SUMS text eol=lf
 *.sh text eol=lf
 
+# 加工GeoJSONは全環境でLF固定（ファイル内metadataのハッシュ検証を安定させる）
+*.geojson text eol=lf
+
 *.xlsx binary
 *.pdf binary
 *.zip binary
