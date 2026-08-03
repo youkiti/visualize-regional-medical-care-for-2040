@@ -8,10 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## データ真正性のルール（最重要）
 
-- `R6/`・`R7/` 配下の生データは**編集禁止**。加工・集計は必ず別ファイル（例: `data/processed/`）へ出力する。
+- `R6/`・`R7/`・`ksj/` 配下の生データは**編集禁止**。加工・集計は必ず別ファイル（例: `data/processed/`）へ出力する。
 - 全生データの出典URL・取得日は `doc/DATA_SOURCES.md` に、SHA-256 は `SHA256SUMS`（ルート直下）に記録済み。新規データ追加時は両方に追記する。
 - 完全性の検証:
-  - Git Bash: `sha256sum -c SHA256SUMS`
+  - Git Bash: `sha256sum -c SHA256SUMS`（`ksj/A38-20` はGit管理外のため、未取得の環境では `sha256sum -c --ignore-missing SHA256SUMS`）
   - PowerShell: `Get-FileHash -Algorithm SHA256 <file>` で `SHA256SUMS` と照合
 - 可視化には出典（厚労省ページURL・年度）を表示できるよう、加工データにも由来メタデータを持たせる。
 
@@ -25,6 +25,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 001723349.xlsx | 別添４③ | 構想区域別の病床数等（1シート約5,000行、339構想区域の繰り返しブロック） |
 | 001723127.xlsx | 別添５② | 構想区域ごとの医療機関別病床数・診療実績・医師数（**339シート**、シート名は「101北海道南渡島」形式） |
 | 001728462.xlsx | （R6版なし） | 在宅（訪問診療）・外来の医療需要推計 2024→2050年度（2シート） |
+
+### ksj/ — 国土数値情報ジオデータ（国土交通省）
+
+| パス | 内容 |
+|---|---|
+| ksj/A38-20/A38-20_GML.zip | 医療圏データ 第2.0版・令和2年度（一次〜三次医療圏ポリゴン）。**1.13GBのためGit管理外**。`python tools/fetch_ksj_geodata.py` で再取得 |
+| ksj/P04-20/P04-20_GML.zip | 医療機関データ 第3.0版・令和2年度（病院・診療所の点データ）。コミット済み |
+
+- 座標系はいずれも JGD2011 地理座標（EPSG:6668）。zip内にシェープファイル・GeoJSON・GML(XML) を同梱（A38 は `_1`=一次、`_2`=二次、`_3`=三次医療圏）。
+- 二次医療圏コード `A38b_003` はゼロ埋め4桁文字列（例 `"0101"`）で需要推計ファイルと同形式。病床系ファイルの数値コードとは下記「結合キーの罠」の正規化が必要。
+- A38 は令和2年度時点の二次医療圏。R7 の339構想区域と区割りが一致しない可能性があるため突合時に検証する。
 
 ### パース時の注意（帳票形式のExcel）
 

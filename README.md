@@ -21,18 +21,24 @@
 |---|---|
 | `R7/` | 令和7年度公表の生データ（**編集禁止**、ファイル名は厚労省のファイルID） |
 | `R6/` | 令和6年度公表の生データ（**編集禁止**、別添資料名） |
+| `ksj/` | 国土数値情報（国土交通省）のジオデータ（**編集禁止**）。二次医療圏境界（A38）・医療機関位置（P04）。A38 はサイズ超過のため Git 管理外（下記参照） |
+| `tools/` | データ取得スクリプト（`fetch_ksj_geodata.py`） |
 | `SHA256SUMS` | 生データの SHA-256 ハッシュ（完全性検証用） |
 | `doc/` | ドキュメント（[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)） |
 | `data/processed/` | 加工済みデータの出力先（予定） |
 
 ## データの真正性
 
-- 生データ（`R6/`・`R7/`）は厚労省サイトからの取得時のまま無加工で保持し、一切編集しない。
+- 生データ（`R6/`・`R7/`・`ksj/`）は取得時のまま無加工で保持し、一切編集しない。
 - 全ファイルの出典 URL・取得日は [doc/DATA_SOURCES.md](doc/DATA_SOURCES.md) に記録している。
+- 医療圏境界（`ksj/A38-20/`、1.13GB）は GitHub の 100MB 制限を超えるためコミットしないが、ハッシュを `SHA256SUMS` に記録し、[tools/fetch_ksj_geodata.py](tools/fetch_ksj_geodata.py) で再取得・照合できる。
 - 改変されていないことは誰でも検証できる:
 
   ```bash
-  # Git Bash / Linux / macOS
+  # Git Bash / Linux / macOS（クローン直後はGit管理外のA38をスキップ）
+  sha256sum -c --ignore-missing SHA256SUMS
+
+  # 全データ取得済みのローカル環境では全量検証
   sha256sum -c SHA256SUMS
   ```
 
@@ -54,6 +60,7 @@
 - [x] 生データ収集・出典/ハッシュ記録（R6・R7）
 - [x] 要件定義（[doc/REQUIREMENTS.md](doc/REQUIREMENTS.md)）
 - [x] GitHub Actions による生データの完全性検証（`sha256sum -c`）
+- [x] 地理データ収集（国土数値情報 二次医療圏境界 A38・医療機関 P04、`ksj/`）
 - [ ] Excel パーサ実装（帳票レイアウト → tidy データ）
 - [ ] 地理データ突合（二次医療圏境界・医療機関位置）
 - [ ] 可視化サイト実装（Vite + React + MapLibre GL）

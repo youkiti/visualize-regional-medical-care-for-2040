@@ -11,4 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: sha256sum -c SHA256SUMS
-        run: sha256sum -c SHA256SUMS
+        # ksj/A38-20 は1GB超のためコミットせずローカル保持（doc/DATA_SOURCES.md参照）。
+        # コミットされている生データのみ厳密に検証する。
+        run: grep -vF 'ksj/A38-20/' SHA256SUMS | sha256sum -c

@@ -1,3 +1,9 @@
+# 国土数値情報 A38（医療圏）全国版zipは1.13GBありGitHubの100MB制限を超えるため
+# コミットしない。完全性はSHA256SUMS、来歴はdoc/DATA_SOURCES.mdで担保し、
+# 再取得はtools/fetch_ksj_geodata.pyで行う。
+ksj/A38-20/*.zip
+ksj/_staging/
+
 # Python
 __pycache__/
 *.py[cod]
