@@ -370,6 +370,14 @@ def build_metadata(forecast_meta: dict, population_meta: dict, inputs: list) -> 
         "demand_population": population_meta["processing"]["caveat"],
     }
 
+    # 原典側の既知の欠陥は入力CSVのmeta.jsonから拾って集約する(この場で定義
+    # しない)。parse_demand_forecast.py の KNOWN_ISSUES へ1件足せば、キーの
+    # 有無に関わらずここを通って表示用データセットと出典欄まで自動で流れる。
+    # build_web_data.py(病床側)と同じ扱い。
+    known_issues = list(forecast_meta.get("known_issues", [])) + list(
+        population_meta.get("known_issues", [])
+    )
+
     return {
         "title": (
             "構想区域別 医療需要推計（在宅（訪問診療）・外来のレセプト件数/月、"
@@ -405,6 +413,7 @@ def build_metadata(forecast_meta: dict, population_meta: dict, inputs: list) -> 
             "caveat": caveat,
         },
         "fields": FIELD_DESCRIPTIONS,
+        "known_issues": known_issues,
     }
 
 

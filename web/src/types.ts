@@ -46,7 +46,22 @@ export interface AreaIndicatorsProcessing {
   caveat: string;
 }
 
-export interface AreaIndicatorsKnownIssue {
+/**
+ * A defect in the published source data, recorded rather than corrected.
+ *
+ * Shared by the bed and demand datasets — unlike the rest of the
+ * AreaIndicators/AreaDemand pairs below, this one shape really is identical
+ * on both sides
+ * (both are emitted by tools/lib/provenance.py's write_csv_with_meta and
+ * aggregated unchanged by the build_web_* scripts), so there is nothing to
+ * drift apart. `id`/`summary`/`action` are always present; `scope`/`evidence`
+ * are optional per entry, hence the index signature.
+ *
+ * Only render string fields directly — `scope` is an object and `evidence` an
+ * array, and React cannot render an object (see the caveat note in
+ * SourceNotes.tsx for the same trap).
+ */
+export interface KnownIssue {
   id: string;
   summary: string;
   action: string;
@@ -58,7 +73,7 @@ export interface AreaIndicatorsMetadata {
   source: AreaIndicatorsSource;
   processing: AreaIndicatorsProcessing;
   fields: Record<string, string>;
-  known_issues: AreaIndicatorsKnownIssue[];
+  known_issues: KnownIssue[];
 }
 
 export interface AreaIndicatorsData {
@@ -178,6 +193,9 @@ export interface AreaDemandMetadata {
   source: AreaDemandSource;
   processing: AreaDemandProcessing;
   fields: Record<string, string>;
+  /** Always present (possibly empty) — build_web_demand.py emits the key
+   * unconditionally, so the demand 出典欄 needs no optional-chaining. */
+  known_issues: KnownIssue[];
 }
 
 export interface AreaDemandData {

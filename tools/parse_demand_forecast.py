@@ -30,6 +30,14 @@ xlsxは339構想区域が単純な表形式(1区域=1行)で並んでいるた�
        - demand_forecast.csv: 在宅(訪問診療)・外来のレセプト件数/月推計
        - demand_population.csv: 人口(2024年度・2040年)
 
+原典側の欠陥は `KNOWN_ISSUES`(id/scope/summary/evidence/action)へ構造化して
+記録する。値は勝手に補正せず原典どおり出力し、`known_issues_for()` が
+`scope.csv` で振り分けて各CSVの meta.json へ載せる。そこから
+`build_web_demand.py` が area_demand_R7.json へ集約し、可視化サイトの出典欄に
+「データの既知の問題」として列挙される。新しい欠陥を見つけたら caveat に
+長文を足すのではなく KNOWN_ISSUES へ1件足すこと(`tools/parse_area_beds.py`
+も同じ形式)。
+
 ⚠ センチネル値の罠(CLAUDE.md): この帳票には現時点で非数値センチネルは
 確認されていないが、`001723349.xlsx`(構想区域の病床数等)の推計流出入
 患者割合のように将来 'XXX' 等が混入しても静かに壊れないよう、需要値・
@@ -146,11 +154,14 @@ FIELDS_POPULATION = {
     "area_name": AREA_NAME_DESC,
     "population_2024": (
         "原典の見出し『人口(2024年度)』の値(人単位の整数)。原典の見出し文字列自体が"
-        "「年度」表記であり、population_2040(「年」表記)と基準が混在している点に留意"
+        "「年度」表記であり、population_2040(「年」表記)と基準が混在している点に留意。"
+        "さらにこの列は基準年が厚生労働省の公表物どうしで食い違っている"
+        "(known_issuesのdemand_population_base_year_conflict参照)"
     ),
     "population_2040": (
         "原典の見出し『人口(2040年)』の値(人単位の整数)。原典の見出し文字列自体が"
-        "「年」表記であり、population_2024(「年度」表記)と基準が混在している点に留意"
+        "「年」表記であり、population_2024(「年度」表記)と基準が混在している点に留意。"
+        "こちらは公式説明書も『人口(2040年)』で一致している"
     ),
 }
 
@@ -163,7 +174,55 @@ CAVEAT_POPULATION = (
     "population_2024/population_2040は需要推計の参考情報であり、原典の見出しが"
     "『人口(2024年度)』『人口(2040年)』で年度/年の表記が混在している"
     "(fields参照。単位変換は不要、原典から実数のまま)。"
+    "加えて、基準人口の年が厚生労働省の公表物どうしで食い違っている"
+    "(known_issues参照。値は原典どおりで、読み替えはしていない)。"
 )
+
+# 原典データ自体が抱える既知の品質問題(値は勝手に補正せず、機械可読な形で
+# 記録する)。`tools/parse_area_beds.py` の KNOWN_ISSUES と同じ形
+# (id/scope/summary/evidence/action)で、`build_web_demand.py` が入力CSVの
+# meta.json から拾って area_demand_R7.json の metadata.known_issues へ集約し、
+# 可視化サイトの出典欄にそのまま列挙される。
+# 新たに原典側の欠陥を見つけたら、caveat に長文を足すのではなくここへ1件
+# 追加すること(caveat は概要とこちらへのポインタに留める)。
+KNOWN_ISSUES = [
+    {
+        "id": "demand_population_base_year_conflict",
+        "scope": {"csv": "demand_population.csv", "columns": ["population_2024"]},
+        "summary": (
+            "基準人口の年が厚生労働省の公表物どうしで一致していない"
+            "(原典のR7/001728462.xlsxと、同じ公表回の説明書R7/001728467.pdfの"
+            "いずれかが誤っている疑いがある)"
+        ),
+        "evidence": [
+            "原典Excel(R7/001728462.xlsx)の5行目D列の見出しは『人口(2024年度)』",
+            "同じ公表回の公式説明書(R7/001728467.pdf「構想区域の医療需要推計について」)は"
+            "同じ列を『人口(2025 年)』とし、その出典を総務省「住民基本台帳人口」(2025年)"
+            "と明記している",
+            "2040年の列は両者とも『人口(2040年)』で一致しており(説明書の出典は"
+            "国立社会保障・人口問題研究所「日本の地域別将来推計人口」2040年推計)、"
+            "食い違うのは基準年の列だけ",
+        ],
+        "action": (
+            "どちらが誤りかは公表物からは決められないため、値・列名ともに原典Excelの"
+            "見出し表記(population_2024)のままとし、説明書側への読み替えはしていない"
+            "(勝手に補正しない)。可視化では基準人口のラベルから年を外し、不一致を"
+            "注記で明示すること。未決着の扱いであり、正しさを確認したものではない"
+        ),
+    },
+]
+
+
+def known_issues_for(csv_name: str):
+    """`KNOWN_ISSUES` のうち `scope.csv` が `csv_name` のものを返す。
+
+    該当が無ければ `None`(空リストではなく)を返す。`write_csv_with_meta` は
+    `None` のとき meta.json に `known_issues` キー自体を出力しないため、問題が
+    記録されていないCSVの出力はキーごと現れない。KNOWN_ISSUES へ1件足すだけで
+    対応するCSVのmeta.jsonへ載るようにするための間接層。
+    """
+    issues = [issue for issue in KNOWN_ISSUES if issue["scope"]["csv"] == csv_name]
+    return issues or None
 
 STEPS_COMMON = [
     "verify_source()でR7/001728462.xlsxのSHA-256をSHA256SUMSと照合",
@@ -558,6 +617,7 @@ def build_and_write(out_dir: Path) -> dict:
             "caveat": CAVEAT_FORECAST,
         },
         fields=FIELDS_FORECAST,
+        known_issues=known_issues_for("demand_forecast.csv"),
     )
     print(f"[ok] 出力: {forecast_csv} ({len(forecast_rows)}行)")
 
@@ -600,6 +660,7 @@ def build_and_write(out_dir: Path) -> dict:
             "caveat": CAVEAT_POPULATION,
         },
         fields=FIELDS_POPULATION,
+        known_issues=known_issues_for("demand_population.csv"),
     )
     print(f"[ok] 出力: {population_csv} ({len(population_tuples)}行)")
 

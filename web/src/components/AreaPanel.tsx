@@ -95,7 +95,7 @@ export default function AreaPanel({
         {demandArea && (
           <>
             <li>
-              <span>人口（2024年度、医療需要推計）</span>
+              <span>人口（医療需要推計の基準人口）※</span>
               <span>{formatInteger(demandArea.population_2024)} 人</span>
             </li>
             <li>
@@ -105,6 +105,19 @@ export default function AreaPanel({
           </>
         )}
       </ul>
+
+      {/* 基準人口の年は厚生労働省の公表物どうしで食い違っている。どちらかを黙って
+          採用すると誤った基準年を断定してしまうため、ラベルからは年を外し、不一致を
+          明示する(詳細は SourceNotes の「人口（参考情報）について」= 原典メタデータの
+          caveat)。2040年の列は両者一致するのでラベルに年を残している。 */}
+      {demandArea && (
+        <p className="population-basis-note">
+          ※ 基準人口の年は原典間で一致しません。原典Excel（001728462.xlsx）の見出しは
+          「人口(2024年度)」ですが、同じ公表回の公式説明書（001728467.pdf）は「人口(2025年)」
+          （総務省「住民基本台帳人口」2025年）と記載しています。本サイトは原典Excelの値を
+          そのまま表示しており、どちらかへの読み替えはしていません。
+        </p>
+      )}
 
       <h3 className="area-panel-subheading">医療需要推計（レセプト件数/月）</h3>
       {demandArea ? (
