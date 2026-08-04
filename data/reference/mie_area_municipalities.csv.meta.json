@@ -1,0 +1,297 @@
+{
+  "title": "三重県 構想区域 × 二次医療圏(令和2年度) × 構成市町 対応表",
+  "source": {
+    "name": "三重県公式資料(対応表) × A38-20(市町コード解決)",
+    "inputs": [
+      {
+        "file": "mie/001092203.pdf",
+        "title": "資料４ 第８次三重県医療計画における二次医療圏の設定について",
+        "publisher": "三重県医療政策課",
+        "url": "https://www.pref.mie.lg.jp/common/content/001092203.pdf",
+        "acquired_date": "2026-08-04",
+        "source_sha256": "f7ad9c64f61a57f956f8d3469c6acec25702b0d5442b1de602b17a30c97be4bf",
+        "reference_page": "9ページ「現行の二次医療圏・構想区域」",
+        "role": "対応表(構想区域8区域×構成市町29市町×二次医療圏4圏域)の手転記元"
+      },
+      {
+        "file": "data/processed/iryoken2_A38-20.geojson",
+        "feature_count": 335,
+        "source_file": "ksj/A38-20/A38-20_GML.zip 内 A38-20_GML/A38-20_2.shp",
+        "source_sha256": "40a0be3688cd129dfd86fef7508e563b1f34259b5b37a521ebf7a01295013b5d",
+        "role": "市町コード(muni_code)の解決元(A38b_001/A38b_002を市町名で照合)"
+      }
+    ],
+    "license": "三重県ウェブサイト利用規約 / 国土数値情報ダウンロードサービス利用約款（オープンデータ）"
+  },
+  "processing": {
+    "script": "tools/build_mie_area_municipalities.py",
+    "date": "2026-08-04",
+    "steps": [
+      "対応表(構想区域8区域→構成市町29市町→二次医療圏4圏域)はmie/001092203.pdf 9ページ「現行の二次医療圏・構想区域」の表からの手転記(MAPPING定数)",
+      "市町コード(muni_code)はiryoken2_A38-20.geojsonのA38b_001/A38b_002(構成市区町村のコード/名称)から市町名で解決(名称で引けなかった市町があれば中断)",
+      "検証1(網羅性): CSVの29市町コードが、A38の三重県4圏域(2401〜2404)の構成市区町村29市町と完全一致することを確認",
+      "検証2(一意性): 29市町コードすべてがCSV内でちょうど1回だけ出現することを確認",
+      "検証3(入れ子の整合): 29行すべてでparent_iryoken2_codeが、A38が実際にその市町を割り当てている二次医療圏コードと一致することを確認(不一致0件)",
+      "検証4(名称の一致): 29件すべてでmuni_nameがA38のA38b_002表記と完全一致することを確認(不一致0件)",
+      "検証5(独立した裏付け): R7/001723127.xlsx(339シート中、三重県8シート)の「(2)区域内の医療機関」表の②所在地列から市町名を収集し、20市町がCSVの構想区域割当と一致することを確認(不一致0件。病床報告機関のない市町は裏付けの対象外)",
+      "検証6(残存リスク): 検証5で裏付けが取れない市町9件のうち、旧圏域が複数の新区域に分割されるケースに該当する8件を真の残存リスクとして明示(旧圏域が分割されない残り1件は、対応する新区域が一意に定まるため残存リスクに含めない)"
+    ],
+    "caveat": "対応表(MAPPING)自体は一次資料PDFからの手転記であり、上記検証1〜5はいずれも『転記結果とA38・医療機関所在地との整合』を確認するものであって、PDF自体のOCR的な自動検証ではない。真の残存リスク(手転記のみに依拠する市町)は`verification.residual_risk.true_residual_risk` を参照。監査できるよう一次資料PDF(mie/001092203.pdf)をリポジトリに収載している。"
+  },
+  "fields": {
+    "area_code": "構想区域コード(ゼロ埋め4桁の文字列)。三重県の8構想区域(2405桑員〜2412東紀州)",
+    "area_name": "構想区域名",
+    "muni_code": "市区町村コード(iryoken2_A38-20.geojson の A38b_001 より、市町名で解決)。行政区域コードの文字列表記",
+    "muni_name": "市区町村名(iryoken2_A38-20.geojson の A38b_002 の表記と完全一致)",
+    "parent_iryoken2_code": "当該市町が属する二次医療圏(令和2年度、A38-20)のコード。三重県の旧4圏域(2401北勢〜2404東紀州)",
+    "parent_iryoken2_name": "上記二次医療圏名"
+  },
+  "verification": {
+    "coverage": {
+      "csv_muni_count": 29,
+      "a38_union_muni_count": 29
+    },
+    "uniqueness": {
+      "muni_count": 29
+    },
+    "nesting": {
+      "checked": 29,
+      "mismatches": []
+    },
+    "name_match": {
+      "checked": 29,
+      "mismatches": []
+    },
+    "institution_corroboration": {
+      "source_file": "R7/001723127.xlsx",
+      "source_sha256": "acdd3dffdea6da5b20e66aec083227540367100d694bbd83c9a72bede33f3171",
+      "verified_pairs": [
+        [
+          "2405",
+          "いなべ市"
+        ],
+        [
+          "2405",
+          "桑名市"
+        ],
+        [
+          "2406",
+          "四日市市"
+        ],
+        [
+          "2406",
+          "菰野町"
+        ],
+        [
+          "2407",
+          "亀山市"
+        ],
+        [
+          "2407",
+          "鈴鹿市"
+        ],
+        [
+          "2408",
+          "津市"
+        ],
+        [
+          "2409",
+          "伊賀市"
+        ],
+        [
+          "2409",
+          "名張市"
+        ],
+        [
+          "2410",
+          "大台町"
+        ],
+        [
+          "2410",
+          "明和町"
+        ],
+        [
+          "2410",
+          "松阪市"
+        ],
+        [
+          "2411",
+          "伊勢市"
+        ],
+        [
+          "2411",
+          "南伊勢町"
+        ],
+        [
+          "2411",
+          "志摩市"
+        ],
+        [
+          "2411",
+          "玉城町"
+        ],
+        [
+          "2412",
+          "尾鷲市"
+        ],
+        [
+          "2412",
+          "御浜町"
+        ],
+        [
+          "2412",
+          "熊野市"
+        ],
+        [
+          "2412",
+          "紀北町"
+        ]
+      ],
+      "verified_muni_count": 20,
+      "mismatches": []
+    },
+    "residual_risk": {
+      "split_parent_iryoken2_codes": [
+        "2401",
+        "2402",
+        "2403"
+      ],
+      "unverified_count": 9,
+      "unverified": [
+        {
+          "area_code": "2405",
+          "area_name": "桑員",
+          "muni_name": "木曽岬町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2405",
+          "area_name": "桑員",
+          "muni_name": "東員町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2406",
+          "area_name": "三泗",
+          "muni_name": "朝日町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2406",
+          "area_name": "三泗",
+          "muni_name": "川越町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2410",
+          "area_name": "松阪",
+          "muni_name": "多気町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2410",
+          "area_name": "松阪",
+          "muni_name": "大紀町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2411",
+          "area_name": "伊勢志摩",
+          "muni_name": "鳥羽市",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2411",
+          "area_name": "伊勢志摩",
+          "muni_name": "度会町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2412",
+          "area_name": "東紀州",
+          "muni_name": "紀宝町",
+          "parent_iryoken2_code": "2404",
+          "parent_iryoken2_name": "東紀州"
+        }
+      ],
+      "true_residual_risk_count": 8,
+      "true_residual_risk": [
+        {
+          "area_code": "2405",
+          "area_name": "桑員",
+          "muni_name": "木曽岬町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2405",
+          "area_name": "桑員",
+          "muni_name": "東員町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2406",
+          "area_name": "三泗",
+          "muni_name": "朝日町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2406",
+          "area_name": "三泗",
+          "muni_name": "川越町",
+          "parent_iryoken2_code": "2401",
+          "parent_iryoken2_name": "北勢"
+        },
+        {
+          "area_code": "2410",
+          "area_name": "松阪",
+          "muni_name": "多気町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2410",
+          "area_name": "松阪",
+          "muni_name": "大紀町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2411",
+          "area_name": "伊勢志摩",
+          "muni_name": "鳥羽市",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        },
+        {
+          "area_code": "2411",
+          "area_name": "伊勢志摩",
+          "muni_name": "度会町",
+          "parent_iryoken2_code": "2403",
+          "parent_iryoken2_name": "南勢志摩"
+        }
+      ],
+      "unambiguous_unverified_count": 1,
+      "unambiguous_unverified": [
+        {
+          "area_code": "2412",
+          "area_name": "東紀州",
+          "muni_name": "紀宝町",
+          "parent_iryoken2_code": "2404",
+          "parent_iryoken2_name": "東紀州"
+        }
+      ]
+    }
+  },
+  "row_count": 29
+}
