@@ -83,12 +83,19 @@ def write_csv_with_meta(
     source: dict,
     processing: dict,
     fields: dict,
+    known_issues=None,
 ):
     """tidy CSVと由来メタデータ(`<csv_path>.meta.json`)を同時に書き出す。
 
     - CSV: UTF-8・BOMなし・改行はLF固定(`csv.writer` の `lineterminator="\\n"`)
     - meta.json: UTF-8・LF・`ensure_ascii=False`・インデント2。
-      `title` / `source` / `processing` / `fields` / `row_count` を持つ。
+      `title` / `source` / `processing` / `fields` / `known_issues`(省略時は
+      キー自体を出力しない) / `row_count` を持つ。
+
+    `known_issues` は原典データ自体が抱える既知の品質問題(値は勝手に
+    修正せず、機械可読な形で記録するためのもの)。省略時(`None`)は
+    meta.json に `known_issues` キーを一切出力しない(既存出力とのバイト
+    一致を壊さないため)。
 
     戻り値: (csv_path, meta_path) の Path タプル。
     """
@@ -106,8 +113,10 @@ def write_csv_with_meta(
         "source": source,
         "processing": processing,
         "fields": fields,
-        "row_count": len(rows),
     }
+    if known_issues is not None:
+        meta["known_issues"] = known_issues
+    meta["row_count"] = len(rows)
     meta_path = Path(str(csv_path) + ".meta.json")
     with open(meta_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

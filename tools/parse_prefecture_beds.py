@@ -20,7 +20,12 @@
 ⚠ R6との列ずれ: R6(別添４②)は実績年が1年少なく(2015, 2018〜2024)、その
 分だけ見込量/必要数の列がR7よりも1列前にずれる。見込量の対象年も異なる
 (R6=2025年見込量 / R7=2026年見込量)。そのため列は位置ではなく、サブヘッダー
-行の文字列から都度解決する(`_read_header_row` / `_column_map_from_header`)。
+行の文字列から都度解決する(`tools/lib/block_report.py` の
+`resolve_columns` / `classify_bed_column`)。
+
+帳票走査・サブヘッダー解決の汎用部分は `tools/lib/layout.py` /
+`tools/lib/block_report.py` に切り出してあり、`tools/parse_area_beds.py`
+(構想区域パーサ)と共用する。
 
 必要環境: Python 3.11+, openpyxl
 
@@ -29,7 +34,6 @@
 """
 import argparse
 import datetime
-import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,7 +43,19 @@ if __package__ in (None, ""):
 
 import openpyxl
 
+from tools.lib.block_report import (
+    assert_repeated_header,
+    classify_bed_column,
+    iter_fixed_blocks,
+    resolve_columns,
+)
 from tools.lib.codes import normalize_pref_code
+
+# `LayoutMismatchError` はこのモジュール内では直接送出しないが、共通基盤へ
+# 切り出す前からの利用側(tools/tests/test_parse_prefecture_beds.py)が
+# `from tools.parse_prefecture_beds import LayoutMismatchError` で参照して
+# いるため、後方互換の再エクスポートとして残している(未使用に見えるが削除不可)。
+from tools.lib.layout import LayoutMismatchError, expect, expect_int
 from tools.lib.provenance import REPO_ROOT, verify_source, write_csv_with_meta
 
 # 各公表年度の元データ設定。将来 R6 の出力にも対応できるよう両方定義して
@@ -87,10 +103,6 @@ NUM_BLOCKS = 48  # 全国(0) + 都道府県(1〜47)
 
 BED_FUNCTIONS = ["合計", "高度急性期", "急性期", "回復期", "慢性期"]
 
-_ACTUAL_RE = re.compile(r"^(\d{4})実績$")
-_PLAN_RE = re.compile(r"^(\d{4})見込量$")
-_REQUIRED_RE = re.compile(r"^(\d{4})必要数$")
-
 PREF_CODE_DESC = (
     "都道府県コード(ゼロ埋め2桁の文字列)。'00'=全国、'01'〜'47'=都道府県"
     "(01=北海道…47=沖縄県、原典の都道府県コード順)"
@@ -133,10 +145,6 @@ STEPS_COMMON = [
 ]
 
 
-class LayoutMismatchError(Exception):
-    """帳票のレイアウトが想定(サブヘッダー・ラベル位置)と異なる場合に送出する。"""
-
-
 @dataclass
 class ParseResult:
     published_fy: str
@@ -145,75 +153,6 @@ class ParseResult:
     beds_rows: list = field(default_factory=list)
     report_rate_rows: list = field(default_factory=list)
     basic_rows: list = field(default_factory=list)
-
-
-def _normalize_header_text(v) -> str:
-    if v is None:
-        return ""
-    return str(v).replace("\n", "").strip()
-
-
-def _read_header_row(ws, header_row: int, col_start: int, col_end: int):
-    """サブヘッダー行を正規化した文字列のタプルとして読む(ブロック間比較用)。
-
-    `col_start`〜`col_end`(両端含む)の範囲のみを対象とする。A列(ブロック
-    番号)と最終列(「0　全国」等のブロックごとの通し番号ラベル)はブロックに
-    よって値が変わるのが仕様上正しい(レイアウト崩れではない)ため、比較対象
-    から除外する。
-    """
-    return tuple(
-        _normalize_header_text(ws.cell(row=header_row, column=c).value)
-        for c in range(col_start, col_end + 1)
-    )
-
-
-def _column_map_from_header(raw_header, col_start: int):
-    """正規化済みサブヘッダーから {列番号: (series, year)} を作る。
-
-    実績/見込量/必要数の列のみを対象とする。派生比率列
-    (…に対する比／…との差／見込み／必要数)はこの関数の正規表現に
-    マッチしないため自然に除外される(値はパーサ出力から再計算可能)。
-    """
-    col_map = {}
-    for idx, text in enumerate(raw_header, start=col_start):
-        if not text:
-            continue
-        m = _ACTUAL_RE.match(text)
-        if m:
-            col_map[idx] = ("実績", int(m.group(1)))
-            continue
-        m = _PLAN_RE.match(text)
-        if m:
-            col_map[idx] = ("見込量", int(m.group(1)))
-            continue
-        m = _REQUIRED_RE.match(text)
-        if m:
-            col_map[idx] = ("必要数", int(m.group(1)))
-            continue
-    return col_map
-
-
-def _expect(actual, expected, message):
-    if actual != expected:
-        raise LayoutMismatchError(f"{message}: 期待={expected!r} 実際={actual!r}")
-
-
-def _expect_int(value, *, block, row, col):
-    """病床数セルの値が整数(またはinteger値のfloat)であることを検証する。
-
-    素朴な `int(value)` は非整数の float を黙って切り捨て(`1234.7` ->
-    `1234`)、`None` なら意味の分からない `TypeError` になる。真正性を
-    担保するパイプラインで「静かに値が変わる」のは最悪の失敗モードのため、
-    int、または `float.is_integer()` が真の float 以外はブロック番号・行・
-    列・実際の値を添えて `LayoutMismatchError` で中断する。
-    """
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    if isinstance(value, float) and value.is_integer():
-        return int(value)
-    raise LayoutMismatchError(
-        f"ブロック{block} 行{row} 列{col}: 病床数セルの値が整数ではありません: {value!r}"
-    )
 
 
 def _convert_man_to_person(value_man) -> int:
@@ -245,80 +184,81 @@ def parse_sheet(ws, published_fy: str) -> ParseResult:
     header_col_start = 2
     header_col_end = max_col - 1
     result = ParseResult(published_fy=published_fy, title=title, notes=notes)
-    reference_header = None
-    reference_col_map = None
 
-    for block in range(NUM_BLOCKS):
-        top = BLOCK_TOP0 + BLOCK_SIZE * block
+    # 全国(0)を先頭に47都道府県(1〜47)が続く連番。`assert_repeated_header` で
+    # 複数回走査するため、ジェネレータのままではなくリスト化しておく。
+    blocks = list(
+        iter_fixed_blocks(
+            ws,
+            first_row=BLOCK_TOP0,
+            block_size=BLOCK_SIZE,
+            count=NUM_BLOCKS,
+            first_number=0,
+        )
+    )
 
-        block_code = ws.cell(row=top, column=1).value
-        _expect(block_code, block, f"ブロック{block}: A列のブロック番号が不一致")
+    reference_header = assert_repeated_header(
+        ws, blocks, row_offset=8, col_start=header_col_start, col_end=header_col_end
+    )
+    col_map = resolve_columns(
+        reference_header, col_start=header_col_start, classify=classify_bed_column
+    )
+
+    for block in blocks:
+        top = block.top_row
 
         label_row = top + 2
-        _expect(
+        expect(
             ws.cell(row=label_row, column=4).value,
             "都道府県",
-            f"ブロック{block}: 基礎情報ラベル行(D列)",
+            f"ブロック{block.index}: 基礎情報ラベル行(D列)",
         )
         pref_code_num = ws.cell(row=label_row, column=6).value
         pref_name = ws.cell(row=label_row, column=8).value
         pref_code = normalize_pref_code(pref_code_num)
-        # A列のブロック番号(block_code)とF列の都道府県コード(pref_code_num)は
+        # A列のブロック番号(block.number)とF列の都道府県コード(pref_code_num)は
         # 本来常に一致するはずの結合キー。ここで検証しないと、食い違いが
         # あった場合に静かにF列側が採用されてしまい、下流の全結合がこの
         # キーに乗るため気づけない。
-        _expect(
+        expect(
             pref_code,
-            f"{block:02d}",
-            f"ブロック{block}: A列のブロック番号とF列の都道府県コード(正規化後)が不一致",
+            f"{block.index:02d}",
+            f"ブロック{block.index}: A列のブロック番号とF列の都道府県コード(正規化後)が不一致",
         )
 
         pop_row = top + 4
-        _expect(
+        expect(
             ws.cell(row=pop_row, column=4).value,
             "2020国勢調査人口",
-            f"ブロック{block}: 人口ラベル行(D列)",
+            f"ブロック{block.index}: 人口ラベル行(D列)",
         )
         population_source_value = ws.cell(row=pop_row, column=6).value
 
         area_row = top + 5
-        _expect(
+        expect(
             ws.cell(row=area_row, column=4).value,
             "2020面積",
-            f"ブロック{block}: 面積ラベル行(D列)",
+            f"ブロック{block.index}: 面積ラベル行(D列)",
         )
         area_source_value = ws.cell(row=area_row, column=6).value
 
         section_row = top + 6
-        _expect(
+        expect(
             ws.cell(row=section_row, column=3).value,
             "○病床数の状況",
-            f"ブロック{block}: 病床数セクション見出し行(C列)",
+            f"ブロック{block.index}: 病床数セクション見出し行(C列)",
         )
-
-        header_row = top + 8
-        raw_header = _read_header_row(ws, header_row, header_col_start, header_col_end)
-        if reference_header is None:
-            reference_header = raw_header
-            reference_col_map = _column_map_from_header(raw_header, header_col_start)
-        elif raw_header != reference_header:
-            raise LayoutMismatchError(
-                f"ブロック{block}のサブヘッダー行が先頭ブロックと異なります\n"
-                f"  先頭ブロック: {reference_header}\n"
-                f"  ブロック{block}: {raw_header}"
-            )
-        col_map = reference_col_map
 
         for i, bed_function in enumerate(BED_FUNCTIONS):
             row = top + 9 + i
-            _expect(
+            expect(
                 ws.cell(row=row, column=5).value,
                 bed_function,
-                f"ブロック{block}: 病床機能ラベル行(E列, {bed_function})",
+                f"ブロック{block.index}: 病床機能ラベル行(E列, {bed_function})",
             )
             for col, (series, year) in col_map.items():
                 value = ws.cell(row=row, column=col).value
-                beds = _expect_int(value, block=block, row=row, col=col)
+                beds = expect_int(value, block=block.index, row=row, col=col)
                 result.beds_rows.append(
                     {
                         "published_fy": published_fy,
@@ -332,10 +272,10 @@ def parse_sheet(ws, published_fy: str) -> ParseResult:
                 )
 
         rate_row = top + 9 + len(BED_FUNCTIONS)
-        _expect(
+        expect(
             ws.cell(row=rate_row, column=5).value,
             "（報告率）",
-            f"ブロック{block}: 報告率ラベル行(E列)",
+            f"ブロック{block.index}: 報告率ラベル行(E列)",
         )
         for col, (series, year) in col_map.items():
             if series != "実績":
