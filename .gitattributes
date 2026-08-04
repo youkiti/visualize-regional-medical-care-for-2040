@@ -13,6 +13,9 @@ SHA256SUMS text eol=lf
 # 加工データのmeta.jsonも同じ理由でLF固定（将来バイト比較する場合に備える）
 *.json text eol=lf
 
+# 生成レポートもバイト一致テストの対象のためLF固定
+doc/JOIN_VERIFICATION.md text eol=lf
+
 *.xlsx binary
 *.pdf binary
 *.zip binary
