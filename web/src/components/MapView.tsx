@@ -12,6 +12,7 @@ import {
   demandCategoryOf,
   demandRatioKey,
   formatChangeRatio,
+  formatInteger,
   formatMetricValue,
   formatReceipts,
   isDemandMetric,
@@ -19,6 +20,7 @@ import {
   readDemandValue,
   readMetricValue,
 } from '../lib/metrics';
+import { EMPTY_FACILITY_POINTS, type FacilityPointFeatureCollection, type FacilityPointProperties } from '../lib/facilityPoints';
 
 // 沖縄県〜北海道を含む初期表示範囲。東京都島しょ部(小笠原諸島・南鳥島)は範囲外
 // (SourceNotes に注記あり)。
@@ -40,7 +42,24 @@ const LAYER_OUTLINE = 'area-outline';
 const LAYER_HOVER_OUTLINE = 'area-hover-outline';
 const LAYER_SELECTED_OUTLINE = 'area-selected-outline';
 
+// 選択区域の医療機関ポイント。ソースは空のFeatureCollectionでスタイル定義時に
+// 一度だけ追加し、以後は setData() で更新する(ソースを足し引きしない— 罠5と
+// 同種のStrictMode対策の作法)。レイヤは区域レイヤ群より上に置く。
+const FACILITIES_SOURCE_ID = 'facilities';
+const LAYER_FACILITY_POINTS = 'facility-points';
+
 const NO_MATCH_FILTER: maplibregl.FilterSpecification = ['==', ['get', 'area_code'], ''];
+
+// 病床数(beds_total)による半径のinterpolate。観測値を持たない施設(['has',
+// 'beds_total']がfalse)にも最小半径3pxで点を描く— 欠測を0床として扱わない
+// (buildFacilityPoints()がbeds_totalキー自体を省略しているので、['get',...]は
+// undefinedを返し、interpolateへ渡すと壊れるためcaseで先に分岐する)。
+const FACILITY_RADIUS_EXPRESSION: unknown = [
+  'case',
+  ['has', 'beds_total'],
+  ['interpolate', ['linear'], ['get', 'beds_total'], 0, 3, 50, 5, 200, 8, 500, 12, 1000, 16],
+  3,
+];
 
 export interface MapViewHandle {
   /** 「全国表示に戻す」— 初期表示と同じ範囲・同じオプションで fitBounds する。 */
@@ -67,7 +86,16 @@ interface MapViewProps {
   demandYear: number;
   demandYearLabel: string;
   demandCategoryLabels: Record<DemandCategoryKey, string>;
+  /** 選択区域の医療機関ポイント(App側でfacilityShardから組み立て済み)。未選択/未取得時は空のFeatureCollection。 */
+  facilityPoints: FacilityPointFeatureCollection;
 }
+
+/** ホバー中のツールチップの種別を区別する。区域と施設のツールチップを同時に
+ * 出さないための単一の状態にしている(施設ポイントは区域ポリゴンの真上に
+ * 乗るため、両方のレイヤが同じ座標でヒットしうる)。 */
+type HoverState =
+  | { kind: 'area'; props: AreaMapFeatureProperties; x: number; y: number }
+  | { kind: 'facility'; props: FacilityPointProperties; x: number; y: number };
 
 function buildFillColorExpression(
   metric: MetricKind,
@@ -132,6 +160,13 @@ function formatHoverTooltip(
   return `${functionLabel}: ${formatMetricValue(metric, readMetricValue(props, metric, bedFunction))}`;
 }
 
+/** 施設ホバーのツールチップ本文（1行）。beds_totalは観測値の施設にしか無いキーなので存在チェックする。 */
+function formatFacilityTooltipBody(props: FacilityPointProperties): string {
+  const bedsText =
+    props.beds_total === undefined ? '病床数（休棟中等含む計） —' : `病床数（休棟中等含む計） ${formatInteger(props.beds_total)} 床`;
+  return props.municipality ? `${props.municipality} ・ ${bedsText}` : bedsText;
+}
+
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
     mapDataUrl,
@@ -144,6 +179,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     demandYear,
     demandYearLabel,
     demandCategoryLabels,
+    facilityPoints,
   },
   ref
 ) {
@@ -158,7 +194,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // cleared automatically once the source finishes loading successfully.
   const [initError, setInitError] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
-  const [hover, setHover] = useState<{ props: AreaMapFeatureProperties; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<HoverState | null>(null);
 
   // Event handlers below are registered once (map is created once) but need
   // the latest callback/prop values — route them through refs to avoid
@@ -177,6 +213,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           [SOURCE_ID]: {
             type: 'geojson',
             data: mapDataUrl,
+          },
+          // 空のFeatureCollectionで一度だけ追加し、以後はsetData()で更新する
+          // (選択区域が変わるたびにソースを足し引きしない)。
+          [FACILITIES_SOURCE_ID]: {
+            type: 'geojson',
+            data: EMPTY_FACILITY_POINTS,
           },
         },
         layers: [
@@ -231,6 +273,24 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             source: SOURCE_ID,
             filter: NO_MATCH_FILTER,
             paint: { 'line-color': '#0b0b0b', 'line-width': 2.5 },
+          },
+          // 選択区域の医療機関ポイント。区域レイヤ群より上に置く。塗りは
+          // 病床の過不足率・需要比の配色(発散7色+連続配色の淡青〜濃青)の
+          // どれとも極端に明度が近くなりにくい白 + 濃い縁取り(#0b0b0b、既存の
+          // hover/selected-outlineと同じ色)にして、下敷きの色が何であっても
+          // 縁で視認できるようにする(罠4と同じ理屈: 塗りの色一色では
+          // 全パターンを避けられないので、輪郭で担保する)。
+          {
+            id: LAYER_FACILITY_POINTS,
+            type: 'circle',
+            source: FACILITIES_SOURCE_ID,
+            paint: {
+              'circle-radius': FACILITY_RADIUS_EXPRESSION as maplibregl.PropertyValueSpecification<number>,
+              'circle-color': '#ffffff',
+              'circle-opacity': 0.9,
+              'circle-stroke-color': '#0b0b0b',
+              'circle-stroke-width': 1.5,
+            },
           },
         ],
       };
@@ -294,20 +354,51 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
     });
 
-    map.on('mousemove', LAYER_FILL, (e) => {
-      const feature = e.features && e.features[0];
-      if (!feature) return;
-      map.getCanvas().style.cursor = 'pointer';
-      const code = feature.properties?.area_code as string | undefined;
-      map.setFilter(LAYER_HOVER_OUTLINE, code ? ['==', ['get', 'area_code'], code] : NO_MATCH_FILTER);
-      setHover({
-        props: feature.properties as unknown as AreaMapFeatureProperties,
-        x: e.point.x,
-        y: e.point.y,
-      });
+    // 施設ポイントは区域ポリゴンの真上に描かれるため、同じ座標で区域レイヤと
+    // 施設レイヤの両方がヒットしうる。区域用・施設用にper-layerのmousemove/
+    // mouseleaveをそれぞれ独立登録すると、どちらが最後にsetHover()するかが
+    // レイヤ登録順に依存してしまい、施設ツールチップと区域ツールチップが
+    // 同時に(あるいは交互に)出うる。単一のmousemoveハンドラで
+    // queryRenderedFeaturesを施設→区域の優先順に呼び、常にどちらか一方だけを
+    // 選ぶ(クリックハンドラが既にqueryRenderedFeaturesで区域を解決している
+    // のと同じ書き方)。
+    map.on('mousemove', (e) => {
+      const facilityFeature = map.queryRenderedFeatures(e.point, { layers: [LAYER_FACILITY_POINTS] })[0];
+      if (facilityFeature) {
+        map.getCanvas().style.cursor = 'pointer';
+        map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+        setHover({
+          kind: 'facility',
+          props: facilityFeature.properties as unknown as FacilityPointProperties,
+          x: e.point.x,
+          y: e.point.y,
+        });
+        return;
+      }
+
+      const areaFeature = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] })[0];
+      if (areaFeature) {
+        map.getCanvas().style.cursor = 'pointer';
+        const code = areaFeature.properties?.area_code as string | undefined;
+        map.setFilter(LAYER_HOVER_OUTLINE, code ? ['==', ['get', 'area_code'], code] : NO_MATCH_FILTER);
+        setHover({
+          kind: 'area',
+          props: areaFeature.properties as unknown as AreaMapFeatureProperties,
+          x: e.point.x,
+          y: e.point.y,
+        });
+        return;
+      }
+
+      map.getCanvas().style.cursor = '';
+      map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+      setHover(null);
     });
 
-    map.on('mouseleave', LAYER_FILL, () => {
+    // 上のmousemoveはcanvas内でのみ発火するため、カーソルがcanvasごと地図の
+    // 外へ一気に抜けた場合の保険(mousemoveが1回も追加発火しないまま
+    // ツールチップが表示されっぱなしになるのを防ぐ)。
+    map.on('mouseout', () => {
       map.getCanvas().style.cursor = '';
       map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
       setHover(null);
@@ -359,6 +450,19 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     );
   }, [selectedAreaCode, ready]);
 
+  // 選択区域の医療機関ポイント。ソース自体はスタイル定義時に空の
+  // FeatureCollectionで一度だけ追加済みなので、ここではsetData()で中身だけ
+  // 差し替える(App側がselectedAreaCode===nullや区域切替の度に空/新しい
+  // FeatureCollectionを渡してくるので、前区域の点が残る心配はない)。
+  // !ready の間は反映しない(=破棄済みインスタンスへsetDataしない。他の
+  // imperativeな効果と同じ作法)。
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const source = map.getSource(FACILITIES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(facilityPoints);
+  }, [facilityPoints, ready]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -391,7 +495,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           {runtimeError}
         </div>
       )}
-      {hover && !initError && (
+      {hover && !initError && hover.kind === 'facility' && (
+        <div className="tooltip" style={{ left: hover.x, top: hover.y }}>
+          <div className="tooltip-title">{hover.props.facility_name}</div>
+          <div>{formatFacilityTooltipBody(hover.props)}</div>
+        </div>
+      )}
+      {hover && !initError && hover.kind === 'area' && (
         <div className="tooltip" style={{ left: hover.x, top: hover.y }}>
           <div className="tooltip-title">
             {hover.props.pref_name} {hover.props.area_name}

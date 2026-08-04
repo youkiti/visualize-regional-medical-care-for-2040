@@ -15,6 +15,10 @@ node_modules/
 dist/
 web/src/generated/
 
+# 医療機関の区域別shard（sync-dataがdata/processed/area_facilities_R7.jsonから
+# 生成する。web/src/generated/と同じく生成物なのでコミットしない）
+web/public/facilities/
+
 # Claude Code (個人設定はコミットしない)
 .claude/settings.local.json
 

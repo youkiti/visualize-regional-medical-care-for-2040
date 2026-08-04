@@ -210,3 +210,129 @@ export interface AreaDemandData {
   baseline_year: number;
   areas: AreaDemandArea[];
 }
+
+// ---- Facility roster (area_facilities_R7.json / generated/facility_summary.json
+// / public/facilities/<area_code>.json) --------------------------------------
+//
+// Mirrors data/processed/area_facilities_R7.json (tools/build_web_facilities.py)
+// and its two derived artifacts (see CLAUDE.md "web/ のデータ構成" and the
+// M5後半 Chunk A/C1 briefs). Deliberately NOT reusing AreaIndicators*/AreaDemand*
+// above — this dataset's metadata shape diverges from both in its own way:
+//   - it carries TWO source blocks, not one: `source` (facility_basic/
+//     facility_observations/facility_functionsの由来、R7/001723127.xlsx) と
+//     `geo_linkage_source`（P04名寄せの由来）。後者は source_file/source_sha256/
+//     acquired_date/fiscal_year を持たない別のキー集合（代わりにinputsを持つ）
+//   - `processing.caveat` は4キー（facility_basic/facility_observations/
+//     facility_functions/facility_geo_linkage）のオブジェクト。AreaIndicators側は
+//     単一文字列、AreaDemand側は2キーで、いずれとも形が違う
+// (CLAUDE.md「可視化実装で判明した罠」11 — 表示用JSONを増やすとmetadataの形は
+// 揃わない。Reactはオブジェクトをそのまま描画できないので、SourceNotesでは
+// caveatの4本を個別に、source/geo_linkage_sourceを別々のJSXで描画する)
+
+export type FacilityValueStatus = 'observed' | 'source_dash' | 'not_disclosed' | 'not_reported' | 'blank';
+
+/** metrics配列の1要素。Facility.values/value_status とインデックスで対応する。 */
+export interface FacilityMetric {
+  key: string;
+  metric: string;
+  bed_function: string;
+  label: string;
+}
+
+export type FacilityMatchStatus = 'matched' | 'candidate_only' | 'unmatched';
+
+export interface Facility {
+  record_id: string;
+  facility_name: string;
+  /** 未報告(value_status='not_reported')の医療機関は原典側で所在地欄も空欄のため空文字になる。 */
+  municipality: string;
+  /** 21要素。トップレベルmetricsと同じ順序・インデックス対応。value_status[i]==='observed' のときのみ数値、それ以外はnull。 */
+  values: Array<number | null>;
+  value_status: FacilityValueStatus[];
+  /** 該当する機能が無い施設ではキー自体が省略される（0件を意味する空配列にはしない）。 */
+  functions?: string[];
+  /** 'matched'=座標あり / 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。 */
+  match_status: FacilityMatchStatus;
+  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' のときのみ存在する。 */
+  coordinates?: [number, number];
+}
+
+/** web/public/facilities/<area_code>.json の形。区域選択時に個別取得する（バンドルしない）。 */
+export interface FacilityShard {
+  area_code: string;
+  area_name: string;
+  pref_code: string;
+  pref_name: string;
+  facility_count: number;
+  geocoded_count: number;
+  facilities: Facility[];
+}
+
+/** generated/facility_summary.json の areas[] 要素。facilities配列を含まない軽量な件数のみ。 */
+export interface FacilitySummaryArea {
+  area_code: string;
+  facility_count: number;
+  geocoded_count: number;
+}
+
+/** facility_basic/facility_observations/facility_functionsの3CSV共通の出典（R7/001723127.xlsx由来）。 */
+export interface FacilitySource {
+  name: string;
+  publisher: string;
+  url: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  source_sheet: string;
+  acquired_date: string;
+  license: string;
+  original_title: string;
+  original_notes: string[];
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+/**
+ * facility_geo_linkage.csv（P04名寄せ）由来の出典ブロック。FacilitySourceとは
+ * キー集合が異なる別の形（source_file/source_sha256/fiscal_year/acquired_date
+ * を持たない代わりにinputsを持つ）ため、型を使い回さない。
+ */
+export interface FacilityGeoLinkageSource {
+  name: string;
+  inputs: Array<{ file: string; role: string; source_sha256: string }>;
+  license: string;
+  page_url: string;
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+export interface FacilityProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 入力CSV4本ぶんのcaveatを持つオブジェクト（AreaIndicatorsProcessing.caveatの
+   * 単一文字列ともAreaDemandProcessing.caveatの2キーとも形が違う）。 */
+  caveat: {
+    facility_basic: string;
+    facility_observations: string;
+    facility_functions: string;
+    facility_geo_linkage: string;
+  };
+}
+
+export interface FacilitySummaryMetadata {
+  title: string;
+  source: FacilitySource;
+  geo_linkage_source: FacilityGeoLinkageSource;
+  processing: FacilityProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface FacilitySummaryData {
+  metadata: FacilitySummaryMetadata;
+  /** 21指標の定義（表示順）。Facility.values/value_status とインデックスで対応する。 */
+  metrics: FacilityMetric[];
+  value_status_labels: Record<FacilityValueStatus, string>;
+  /** facilities配列を含まない軽量な339区域ぶんの件数一覧。 */
+  areas: FacilitySummaryArea[];
+}

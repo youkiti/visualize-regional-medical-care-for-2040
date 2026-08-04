@@ -1,8 +1,9 @@
-import type { AreaDemandMetadata, AreaIndicatorsMetadata, KnownIssue } from '../types';
+import type { AreaDemandMetadata, AreaIndicatorsMetadata, FacilitySummaryMetadata, KnownIssue } from '../types';
 
 interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
+  facilityMetadata: FacilitySummaryMetadata;
 }
 
 /**
@@ -32,7 +33,7 @@ function KnownIssues({ issues, label }: { issues: KnownIssue[]; label: string })
   );
 }
 
-export default function SourceNotes({ metadata, demandMetadata }: SourceNotesProps) {
+export default function SourceNotes({ metadata, demandMetadata, facilityMetadata }: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
   const demandSource = demandMetadata.source;
   // AreaDemandProcessing.caveat is an object with 2 keys (demand_forecast/
@@ -40,6 +41,15 @@ export default function SourceNotes({ metadata, demandMetadata }: SourceNotesPro
   // above — React cannot render an object directly, so both notes are shown
   // individually rather than interpolated as one string (see types.ts).
   const demandCaveat = demandMetadata.processing.caveat;
+  // FacilitySummaryMetadata.processing.caveat has yet another shape (4 keys,
+  // one per input CSV) — see types.ts's comment on why this dataset isn't
+  // reusing AreaIndicators*/AreaDemand*. geo_linkage_source is a second,
+  // differently-shaped source block (P04名寄せ由来) alongside source
+  // (001723127.xlsx由来), so it gets its own <dl> below rather than being
+  // merged into the same JSX as source.
+  const facilitySource = facilityMetadata.source;
+  const geoLinkageSource = facilityMetadata.geo_linkage_source;
+  const facilityCaveat = facilityMetadata.processing.caveat;
 
   return (
     <section className="source-notes" aria-label="出典・注記">
@@ -128,6 +138,72 @@ export default function SourceNotes({ metadata, demandMetadata }: SourceNotesPro
       </dl>
 
       <KnownIssues issues={demandMetadata.known_issues} label="データの既知の問題（医療需要推計）" />
+
+      <h3>出典・注記（医療機関）</h3>
+
+      <p className="caveat">
+        <strong>医療機関一覧について: </strong>
+        {facilityCaveat.facility_basic}
+      </p>
+      <p className="caveat">
+        <strong>病床数・医師数・診療実績について: </strong>
+        {facilityCaveat.facility_observations}
+      </p>
+      <p className="caveat">
+        <strong>医療機関機能について: </strong>
+        {facilityCaveat.facility_functions}
+      </p>
+      <p className="caveat">
+        <strong>座標（国土数値情報P04との名寄せ）について: </strong>
+        {facilityCaveat.facility_geo_linkage}
+      </p>
+
+      <dl>
+        <dt>データ名</dt>
+        <dd>{facilitySource.name}</dd>
+        <dt>公表元</dt>
+        <dd>{facilitySource.publisher}</dd>
+        <dt>公表年度</dt>
+        <dd>{facilitySource.fiscal_year}</dd>
+        <dt>ファイル</dt>
+        <dd>
+          <a href={facilitySource.url} target="_blank" rel="noreferrer">
+            {facilitySource.url}
+          </a>
+        </dd>
+        <dt>掲載ページ</dt>
+        <dd>
+          <a href={facilitySource.page_url} target="_blank" rel="noreferrer">
+            {facilitySource.page_url}
+          </a>
+        </dd>
+        <dt>取得日</dt>
+        <dd>{facilitySource.acquired_date}</dd>
+        <dt>利用規約</dt>
+        <dd>{facilitySource.license}</dd>
+      </dl>
+
+      {/* geo_linkage_sourceはsourceとキー集合が異なる別の形(source_file/
+          source_sha256/fiscal_year/acquired_dateを持たない)ため、同じdlを
+          使い回さずname/page_url/licenseのみの別ブロックとして描画する
+          (CLAUDE.md「可視化実装で判明した罠」11)。 */}
+      <p>
+        <strong>座標の出典（国土数値情報P04との名寄せ）</strong>
+      </p>
+      <dl>
+        <dt>データ名</dt>
+        <dd>{geoLinkageSource.name}</dd>
+        <dt>掲載ページ</dt>
+        <dd>
+          <a href={geoLinkageSource.page_url} target="_blank" rel="noreferrer">
+            {geoLinkageSource.page_url}
+          </a>
+        </dd>
+        <dt>利用規約</dt>
+        <dd>{geoLinkageSource.license}</dd>
+      </dl>
+
+      <KnownIssues issues={facilityMetadata.known_issues} label="データの既知の問題（医療機関）" />
     </section>
   );
 }
