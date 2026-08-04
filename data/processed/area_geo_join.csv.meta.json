@@ -1,0 +1,48 @@
+{
+  "title": "構想区域 × 二次医療圏境界 突合結果",
+  "source": {
+    "name": "構想区域(area_basic.csv) × 二次医療圏境界(iryoken2_A38-20.geojson) の完全外部結合",
+    "inputs": [
+      {
+        "file": "data/processed/area_basic.csv",
+        "row_count": 339,
+        "source_file": "R7/001723349.xlsx",
+        "source_sha256": "f7e0e1495c05f3d3fe7456d9e6250cb639d9f70305b391d7d6ba3d230762eca9"
+      },
+      {
+        "file": "data/processed/iryoken2_A38-20.geojson",
+        "feature_count": 335,
+        "source_file": "ksj/A38-20/A38-20_GML.zip 内 A38-20_GML/A38-20_2.shp",
+        "source_sha256": "40a0be3688cd129dfd86fef7508e563b1f34259b5b37a521ebf7a01295013b5d"
+      },
+      {
+        "file": "data/reference/mie_area_municipalities.csv",
+        "row_count": 29,
+        "source_file": "mie/001092203.pdf",
+        "source_sha256": "f7ad9c64f61a57f956f8d3469c6acec25702b0d5442b1de602b17a30c97be4bf"
+      }
+    ],
+    "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html / 国土数値情報ダウンロードサービス利用約款（オープンデータ） / 三重県ウェブサイト利用規約"
+  },
+  "processing": {
+    "script": "tools/verify_area_join.py",
+    "date": "2026-08-04",
+    "steps": [
+      "area_basic.csv の area_code と iryoken2_A38-20.geojson の A38b_003 を tools.lib.codes.normalize_area_code で正規化し、完全外部結合",
+      "一致(matched)/構想区域側のみ(area_only)/境界側のみ(geo_only)に分類し、join_status→コード昇順で決定的に並べる",
+      "area_only/geo_only には三重県の細分化前後の対応(MIE_OLD_TO_NEW、data/reference/mie_area_municipalities.csv から導出し、実行時に突合結果との一致を検証)から日本語の注記(note)を付与"
+    ],
+    "caveat": "境界(GeoJSON)は令和2年度時点の二次医療圏であり、R7の構想区域と区割りが完全一致しない場合がある(三重県のみ、詳細は doc/JOIN_VERIFICATION.md 参照)。"
+  },
+  "fields": {
+    "join_status": "突合結果。matched=構想区域コードと二次医療圏コードが一致 / area_only=構想区域(area_basic.csv)側にのみ存在(対応する境界がない) / geo_only=二次医療圏境界(iryoken2_A38-20.geojson)側にのみ存在(対応する構想区域コードがない)",
+    "area_code": "構想区域コード(ゼロ埋め4桁の文字列)。geo_only行では空",
+    "area_name": "構想区域名(area_basic.csvより)。geo_only行では空",
+    "pref_code": "都道府県コード(ゼロ埋め2桁の文字列)。geo_only行はarea_basic.csvに対応行がないため、二次医療圏コードの先頭2桁から補っている",
+    "pref_name": "都道府県名。geo_only行では空(pref_codeから機械的に補うと出典外の情報になるため空のまま)",
+    "geo_code": "二次医療圏コード(ゼロ埋め4桁の文字列、A38b_003)。area_only行では空",
+    "geo_name": "二次医療圏名(A38b_004)。area_only行では空",
+    "note": "matched行は空。area_only/geo_only行には、区割りが変わった経緯(三重県の細分化)に関する日本語の説明を入れる。旧圏域↔新区域の個々の対応は三重県公式資料(mie/001092203.pdf)に基づき検証済み(詳細はdoc/JOIN_VERIFICATION.md参照)"
+  },
+  "row_count": 343
+}
