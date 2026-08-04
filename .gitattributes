@@ -15,6 +15,7 @@ SHA256SUMS text eol=lf
 
 # 生成レポートもバイト一致テストの対象のためLF固定
 doc/JOIN_VERIFICATION.md text eol=lf
+doc/FACILITY_LINKAGE.md text eol=lf
 
 *.xlsx binary
 *.pdf binary

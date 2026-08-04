@@ -1,0 +1,74 @@
+{
+  "title": "構想区域別医療機関(facility_basic.csv) × 国土数値情報P04-20 の座標突合結果",
+  "source": {
+    "name": "facility_basic.csv(構想区域別医療機関一覧) × 国土数値情報P04-20(医療機関データ点)のレコードリンケージ",
+    "inputs": [
+      {
+        "file": "R7/001723127.xlsx",
+        "role": "突合対象の医療機関一覧(名称・所在地・区域)の原典",
+        "source_sha256": "acdd3dffdea6da5b20e66aec083227540367100d694bbd83c9a72bede33f3171"
+      },
+      {
+        "file": "ksj/P04-20/P04-20_GML.zip",
+        "role": "座標の付与元(国土数値情報 医療機関データ、令和2年度)",
+        "source_sha256": "24d49390c0760416223784ab2dbb6ad852dbda9a07a5d3b769fba91be91c9732"
+      },
+      {
+        "file": "ksj/P04-20/P04-20_GML.zip 内 P04-20_GML/P04-20.geojson",
+        "role": "zip内メンバーそのもののハッシュ(抽出手順の監査用)",
+        "source_sha256": "e4b5a94353ffe4e87c3e3b82a7d5e490f950f80ad90c63eb4869e7a0537f5420"
+      },
+      {
+        "file": "data/processed/area_boundaries_R7.geojson",
+        "role": "点-多角形判定に用いた339構想区域ポリゴン",
+        "source_sha256": "385f9ed78adfbf426ed8aaabde227a7e975051450c1e9a4f38b684a1c53b8a9e"
+      },
+      {
+        "file": "data/processed/facility_basic.csv",
+        "role": "突合対象そのもの(コミット済みデータのハッシュ、再現性の監査用)",
+        "source_sha256": "632270d517977e37abb8af079f76dccdaec6f1dd174d36eea448cd14a1892116"
+      }
+    ],
+    "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html / 国土数値情報ダウンロードサービス利用約款（オープンデータ）",
+    "page_url": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P04-v3_0.html"
+  },
+  "processing": {
+    "script": "tools/build_facility_geo_linkage.py",
+    "date": "2026-08-05",
+    "method": "マッチ率ではなく誤結合の少なさと監査可能性を最適化した保守的なレコードリンケージ。自動採用(matched)は2ティア: (1)normalized_exact=正規化名の完全一致+区域内一意+市区町村整合、(2)normalized_suffix=正規化名が一方が他方の末尾の関係(法人名等の有無のみの違い)+区域内一意+短い方が5文字以上+市区町村整合。いずれも一対一制約を独立に適用する。あいまい一致は座標を与えずcandidate_onlyとして候補のみ報告する(詳細はdoc/FACILITY_LINKAGE.md参照)",
+    "fuzzy_match_threshold": 0.8,
+    "suffix_tier_min_short_length": 5,
+    "steps": [
+      "verify_source()でR7/001723127.xlsxとksj/P04-20/P04-20_GML.zipのSHA-256をSHA256SUMSと照合",
+      "P04-20.geojsonをストリーム読み込みし、歯科診療所(P04_001=3)を除外",
+      "医療機関名を正規化(NFKC正規化・空白/記号除去・小文字化・法人格語除去)",
+      "339構想区域ポリゴンに対しグリッド索引+レイキャスティングで各P04点の所属区域を判定",
+      "完全一致ティア: 正規化名の完全一致+区域内一意+市区町村整合を満たす候補のみ仮採用し、一対一制約(同一P04フィーチャの競合)違反があれば全員不採用",
+      "接尾一致ティア: 完全一致ティアで採用されなかった施設について、完全一致ティアで採用済みのフィーチャを除いた区域内候補から、正規化名が一方が他方の末尾の関係(短い方が閾値文字数以上)にあるものが1件だけの場合のみ、市区町村整合と一対一制約を満たせば仮採用",
+      "いずれのティアでも仮採用に至らなかった施設は、自動採用済みのフィーチャを除いた区域内P04候補との名称類似度を計算し、閾値以上ならcandidate_onlyとして候補のみ報告(座標なし)"
+    ],
+    "caveat": "位置の推測はしない(doc/REQUIREMENTS.md §4.3): 自動採用(match_status='matched')は(1)正規化名の完全一致(match_method='normalized_exact')、または(2)正規化名が一方が他方の末尾の関係にあり短い方が一定文字数以上(match_method='normalized_suffix')のいずれかに加え、区域内一意+市区町村整合+一対一制約の全てを満たす場合のみで、あいまいな一致は座標を与えずcandidate_onlyとして候補のみ報告する。P04は令和2年度・Excel(facility_basic.csv)は令和7年度公表であり、5年の開差がある(開設・閉院・改称・移転が未マッチの一因になりうるが、個別の未マッチ理由を「改称」「閉院」等と断定はしない。観測できるのは「名称一致候補なし」等の事実のみ)。詳細な方法・実測値はdoc/FACILITY_LINKAGE.mdを参照。未マッチの医療機関は地図上のポイント表示には使わず、一覧表示でのみ扱うこと。"
+  },
+  "fields": {
+    "record_id": "facility_basic.csvのrecord_idと対応する外部キー(制約はfacility_basic.csv側のfields.record_id参照)",
+    "area_code": "構想区域コード(facility_basic.csvより。Excel側の所属区域。P04側から独立に決まる値ではない)",
+    "facility_name": "医療機関名(facility_basic.csvより、正規化前)",
+    "facility_name_normalized": "normalize_facility_name()による正規化後の医療機関名(NFKC正規化・空白/記号除去・小文字化・法人格語除去)",
+    "municipality": "所在地(市区町村、facility_basic.csvより)。未報告の医療機関では空",
+    "match_status": "突合結果。'matched'=高信頼条件を満たし座標を自動採用/'candidate_only'=あいまい一致の候補のみ(座標なし)/'unmatched'=候補なしまたは信頼できる候補が絞れない(座標なし)",
+    "match_method": "採用方法(2ティア、doc/FACILITY_LINKAGE.md「1. 目的と方法」参照)。'normalized_exact'=正規化名の完全一致+区域内一意+市区町村整合/'normalized_suffix'=正規化名が「一方が他方の末尾」の関係(法人名等の有無のみの違い)+区域内一意+短い方が5文字以上+市区町村整合/'none'=matched以外",
+    "reason_code": "matchedに至らなかった理由(matched行は空)。'no_name_match'=正規化名が完全一致する候補が全国に存在しない/'outside_area_polygon'=候補はあるが当該区域のポリゴン内にない/'municipality_mismatch'=区域内に候補は1件あるがP04住所から抽出した市区町村がExcel側と異なる/'municipality_not_in_address'=区域内に候補は1件あるがP04住所に市区町村名そのものが見当たらない(市名を省略した住所。埼玉県の一部市に多い。市区町村を抽出できるが違う'municipality_mismatch'とは原因が異なる)/'multiple_candidates_in_area'=正規化名の完全一致または接尾一致の候補が区域内に複数あり一意に絞れない(P04側の重複登録が原因の場合がある。doc/FACILITY_LINKAGE.md参照)/'contested_candidate'=同一のP04候補を複数のExcel施設が仮採用しようとした(一対一制約違反)/'not_reported_facility'=Excel側が「未報告」で所在地が空のため市区町村を検証できない",
+    "candidate_count": "この行の判定に用いた候補数。match_status='candidate_only'の行では区域内P04候補プール(名称類似度を計算した全候補、自動採用済みのフィーチャを除く)の件数。reason_code='multiple_candidates_in_area'の行では、区域内で正規化名の完全一致または接尾一致の関係にあった候補数。それ以外の行では正規化名が完全一致する候補の件数(区域内、reason_code='outside_area_polygon'のみ全国)",
+    "match_score": "match_status='candidate_only'のときのみ値を持つ(それ以外は空)。facility_name_normalizedとp04_name_normalizedのdifflib.SequenceMatcher類似度(0〜1、閾値はFUZZY_MATCH_THRESHOLD=0.8、根拠はdoc/FACILITY_LINKAGE.md参照)",
+    "p04_feature_index": "P04-20.geojsonのfeatures配列内での通し番号(0始まり、歯科診療所を含む全フィーチャに対する連番)。matched/candidate_only以外では空",
+    "p04_name": "P04側の医療機関名(P04_002、正規化前)。matched/candidate_only以外では空",
+    "p04_name_normalized": "normalize_facility_name()によるP04側名称の正規化後の値",
+    "p04_category": "P04側の医療機関分類(P04_001)。1=病院/2=診療所(歯科診療所3は突合対象外)",
+    "p04_address": "P04側の所在地文字列(P04_003、都道府県名を含まない原文)",
+    "p04_municipality": "extract_municipality()でp04_addressから抽出した市区町村名。抽出できない場合は空",
+    "p04_beds": "P04側の病床数(P04_008)。令和2年度時点の値であり、facility_basic.csvの病床数(令和7年度)とは時点が異なる。**定義も異なる**: P04側は精神病床・結核病床等を含む総病床数、facility_observations.csvの病床数(「休棟中等含む計」)は一般・療養病床のみ。この定義差により両者は大きく食い違う場合があり(精神科病床を主とする病院で顕著、doc/FACILITY_LINKAGE.md「9. 限界」に実測件数と代表例あり)、参考情報にとどめること。突合の妥当性検証や、可視化でExcel側の病床数と並べて見せる用途には使わない",
+    "longitude": "P04側の経度(度、JGD2011)。match_status='matched'の行にのみ値を持つ(位置の推測はしないため、'candidate_only'は候補の名前・住所等の識別情報とスコアのみを出力し座標は与えない。doc/REQUIREMENTS.md §4.3参照)",
+    "latitude": "P04側の緯度(度、JGD2011)。longitudeと同様、match_status='matched'の行にのみ値を持つ"
+  },
+  "row_count": 11760
+}
