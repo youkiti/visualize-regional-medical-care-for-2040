@@ -1,17 +1,30 @@
 import { describe, expect, it } from 'vitest';
+import { demandRatioKey as mjsDemandRatioKey, demandValueKey as mjsDemandValueKey } from '../../scripts/lib/merge.mjs';
 import {
+  classifyBin,
+  classifyDemandRatioBin,
   classifyRatioBin,
   computeQuantileEdges,
   computeRatio,
   computeSequentialClasses,
+  demandCategoryOf,
+  demandRatioKey,
+  demandValueKey,
+  DEMAND_RATIO_BIN_EDGES,
+  DEMAND_RATIO_BIN_LABELS,
   distinctEdges,
+  formatChangeRatio,
   formatDiff,
   formatInteger,
   formatPercent,
   formatRatio,
+  formatReceipts,
+  isDemandMetric,
   RATIO_BIN_COLORS,
   RATIO_BIN_EDGES,
   RATIO_BIN_LABELS,
+  readDemandRatio,
+  readDemandValue,
   SEQUENTIAL_RAMP_COLORS,
   selectRampColors,
 } from './metrics';
@@ -65,6 +78,114 @@ describe('classifyRatioBin', () => {
   it('values just below a boundary stay in the lower bin', () => {
     expect(classifyRatioBin(0.7699999)).toBe(0);
     expect(classifyRatioBin(1.2999999)).toBe(5);
+  });
+});
+
+describe('classifyBin (generalized)', () => {
+  it('classifyRatioBin is a thin wrapper around classifyBin(r, RATIO_BIN_EDGES)', () => {
+    for (const r of [0.5, 0.77, 0.8, 0.87, 0.95, 1.0, 1.05, 1.15, 1.3, 2.83]) {
+      expect(classifyBin(r, RATIO_BIN_EDGES)).toBe(classifyRatioBin(r));
+    }
+  });
+
+  it('classifies with an arbitrary edge list, inclusive lower / exclusive upper', () => {
+    const edges = [10, 20, 30];
+    expect(classifyBin(5, edges)).toBe(0);
+    expect(classifyBin(10, edges)).toBe(1);
+    expect(classifyBin(19.999, edges)).toBe(1);
+    expect(classifyBin(20, edges)).toBe(2);
+    expect(classifyBin(30, edges)).toBe(3);
+    expect(classifyBin(1000, edges)).toBe(3);
+  });
+});
+
+describe('classifyDemandRatioBin', () => {
+  it('has 7 bins with matching labels, reusing the 7-color RATIO_BIN_COLORS palette', () => {
+    expect(RATIO_BIN_COLORS.length).toBe(7);
+    expect(DEMAND_RATIO_BIN_LABELS.length).toBe(7);
+    expect(DEMAND_RATIO_BIN_EDGES.length).toBe(6);
+  });
+
+  it('classifies values well inside each bin', () => {
+    expect(classifyDemandRatioBin(0.5)).toBe(0);
+    expect(classifyDemandRatioBin(0.75)).toBe(1);
+    expect(classifyDemandRatioBin(0.9)).toBe(2);
+    expect(classifyDemandRatioBin(1.0)).toBe(3);
+    expect(classifyDemandRatioBin(1.1)).toBe(4);
+    expect(classifyDemandRatioBin(1.35)).toBe(5);
+    expect(classifyDemandRatioBin(2.02)).toBe(6);
+  });
+
+  it('boundary values are inclusive on the lower edge, exclusive on the upper edge', () => {
+    expect(classifyDemandRatioBin(0.67)).toBe(1);
+    expect(classifyDemandRatioBin(0.83)).toBe(2);
+    expect(classifyDemandRatioBin(0.95)).toBe(3);
+    expect(classifyDemandRatioBin(1.05)).toBe(4);
+    expect(classifyDemandRatioBin(1.2)).toBe(5);
+    expect(classifyDemandRatioBin(1.5)).toBe(6);
+  });
+
+  it('values just below a boundary stay in the lower bin', () => {
+    expect(classifyDemandRatioBin(0.6699999)).toBe(0);
+    expect(classifyDemandRatioBin(1.4999999)).toBe(5);
+  });
+
+  it('covers the observed data range for both categories (home_care 0.76-2.02, outpatient 0.51-1.23)', () => {
+    expect(classifyDemandRatioBin(0.51)).toBe(0);
+    expect(classifyDemandRatioBin(0.76)).toBe(1);
+    expect(classifyDemandRatioBin(1.23)).toBe(5);
+    expect(classifyDemandRatioBin(2.02)).toBe(6);
+  });
+});
+
+describe('isDemandMetric / demandCategoryOf', () => {
+  it('is true only for the 2 demand metric kinds', () => {
+    expect(isDemandMetric('demand_home_care')).toBe(true);
+    expect(isDemandMetric('demand_outpatient')).toBe(true);
+    expect(isDemandMetric('ratio')).toBe(false);
+    expect(isDemandMetric('actual')).toBe(false);
+    expect(isDemandMetric('need')).toBe(false);
+  });
+
+  it('maps each DemandMetricKind to its DemandCategoryKey', () => {
+    expect(demandCategoryOf('demand_home_care')).toBe('home_care');
+    expect(demandCategoryOf('demand_outpatient')).toBe('outpatient');
+  });
+});
+
+describe('demand property key helpers', () => {
+  it('demandValueKey/demandRatioKey match the merge.mjs implementation used by sync-data', () => {
+    for (const category of ['home_care', 'outpatient'] as const) {
+      for (const year of [2024, 2030, 2035, 2040, 2045, 2050]) {
+        expect(demandValueKey(category, year)).toBe(mjsDemandValueKey(category, year));
+        expect(demandRatioKey(category, year)).toBe(mjsDemandRatioKey(category, year));
+      }
+    }
+  });
+
+  it('demandValueKey/demandRatioKey follow the documented naming rule', () => {
+    expect(demandValueKey('home_care', 2040)).toBe('home_care_2040');
+    expect(demandRatioKey('home_care', 2040)).toBe('home_care_r_2040');
+    expect(demandValueKey('outpatient', 2024)).toBe('outpatient_2024');
+    expect(demandRatioKey('outpatient', 2024)).toBe('outpatient_r_2024');
+  });
+});
+
+describe('readDemandValue / readDemandRatio', () => {
+  const props = { home_care_2040: 5464.6, home_care_r_2040: 1.247, outpatient_2024: 261882 };
+
+  it('reads a present numeric value', () => {
+    expect(readDemandValue(props, 'home_care', 2040)).toBeCloseTo(5464.6);
+    expect(readDemandRatio(props, 'home_care', 2040)).toBeCloseTo(1.247);
+  });
+
+  it('returns null for a missing key', () => {
+    expect(readDemandValue(props, 'outpatient', 2040)).toBeNull();
+    expect(readDemandRatio(props, 'outpatient', 2040)).toBeNull();
+  });
+
+  it('returns null for a non-numeric value', () => {
+    expect(readDemandValue({ home_care_2040: 'XXX' }, 'home_care', 2040)).toBeNull();
   });
 });
 
@@ -209,5 +330,21 @@ describe('formatting', () => {
     expect(formatDiff(120, 100)).toBe('+20');
     expect(formatDiff(80, 100)).toBe('-20');
     expect(formatDiff(100, 100)).toBe('0');
+  });
+
+  it('formatChangeRatio signs increases/decreases with one decimal place', () => {
+    expect(formatChangeRatio(1.304)).toBe('+30.4%');
+    expect(formatChangeRatio(0.828)).toBe('-17.2%');
+    expect(formatChangeRatio(1)).toBe('0.0%');
+  });
+
+  it('formatChangeRatio rounds to one decimal place', () => {
+    expect(formatChangeRatio(1.2465)).toBe('+24.6%'); // (ratio-1)*100 = 24.65 -> banker-free round via toFixed
+    expect(formatChangeRatio(0.9999)).toBe('-0.0%'); // -0.01 rounds to -0.0, matches toFixed(1) behavior
+  });
+
+  it('formatReceipts adds thousands separators and the 件/月 unit', () => {
+    expect(formatReceipts(4382.75)).toBe('4,383 件/月');
+    expect(formatReceipts(0)).toBe('0 件/月');
   });
 });

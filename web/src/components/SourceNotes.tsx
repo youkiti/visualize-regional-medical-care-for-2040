@@ -1,15 +1,22 @@
-import type { AreaIndicatorsMetadata } from '../types';
+import type { AreaDemandMetadata, AreaIndicatorsMetadata } from '../types';
 
 interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
+  demandMetadata: AreaDemandMetadata;
 }
 
-export default function SourceNotes({ metadata }: SourceNotesProps) {
+export default function SourceNotes({ metadata, demandMetadata }: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
+  const demandSource = demandMetadata.source;
+  // AreaDemandProcessing.caveat is an object with 2 keys (demand_forecast/
+  // demand_population), not a single string like AreaIndicatorsProcessing.caveat
+  // above — React cannot render an object directly, so both notes are shown
+  // individually rather than interpolated as one string (see types.ts).
+  const demandCaveat = demandMetadata.processing.caveat;
 
   return (
     <section className="source-notes" aria-label="出典・注記">
-      <h3>出典・注記</h3>
+      <h3>出典・注記（病床）</h3>
 
       <p className="caveat">{processing.caveat}</p>
 
@@ -68,6 +75,42 @@ export default function SourceNotes({ metadata }: SourceNotesProps) {
           </ul>
         </details>
       )}
+
+      <h3>出典・注記（医療需要推計）</h3>
+
+      <p className="caveat">
+        <strong>医療需要推計について: </strong>
+        {demandCaveat.demand_forecast}
+      </p>
+      <p className="caveat">
+        <strong>人口（参考情報）について: </strong>
+        {demandCaveat.demand_population}
+      </p>
+
+      <dl>
+        <dt>データ名</dt>
+        <dd>{demandSource.name}</dd>
+        <dt>公表元</dt>
+        <dd>{demandSource.publisher}</dd>
+        <dt>公表年度</dt>
+        <dd>{demandSource.fiscal_year}</dd>
+        <dt>ファイル</dt>
+        <dd>
+          <a href={demandSource.url} target="_blank" rel="noreferrer">
+            {demandSource.url}
+          </a>
+        </dd>
+        <dt>掲載ページ</dt>
+        <dd>
+          <a href={demandSource.page_url} target="_blank" rel="noreferrer">
+            {demandSource.page_url}
+          </a>
+        </dd>
+        <dt>取得日</dt>
+        <dd>{demandSource.acquired_date}</dd>
+        <dt>利用規約</dt>
+        <dd>{demandSource.license}</dd>
+      </dl>
     </section>
   );
 }

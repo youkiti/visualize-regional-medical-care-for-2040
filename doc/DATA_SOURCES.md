@@ -71,6 +71,9 @@
 | prefecture_beds.csv | 都道府県別 病床数（実績/見込量/必要数 × 5機能 × 年、2,640行） | R7/001722915.xlsx | `python tools/parse_prefecture_beds.py` |
 | prefecture_bed_report_rate.csv | 都道府県別 病床機能報告の報告率（432行） | R7/001722915.xlsx | 同上（同じ実行で3ファイルまとめて出力） |
 | prefecture_basic.csv | 都道府県別 基礎情報（2020年人口・面積、48行） | R7/001722915.xlsx | 同上 |
+| demand_forecast.csv | 構想区域別 医療需要推計（在宅（訪問診療）・外来のレセプト件数/月、2024〜2050年度、4,068行） | R7/001728462.xlsx | `python tools/parse_demand_forecast.py` |
+| demand_population.csv | 構想区域別 人口（2024年度・2040年、需要推計の参考情報、339行） | R7/001728462.xlsx | 同上（同じ実行で2ファイルまとめて出力） |
+| area_demand_R7.json | 構想区域別 医療需要推計（在宅（訪問診療）・外来のレセプト件数/月、2024〜2050年度、可視化サイト表示用、339区域） | demand_forecast.csv・demand_population.csv・area_boundaries_R7.geojson | `python tools/build_web_demand.py` |
 
 加工内容の要点（詳細はファイル内 `metadata.processing` または `.meta.json` の `processing` 参照）:
 
