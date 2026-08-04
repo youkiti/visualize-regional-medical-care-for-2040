@@ -55,7 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）と `web/public/facilities/`（同じくGit管理外）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
@@ -63,6 +63,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `area_demand.json` | 需要推計の正本の忠実コピー。**バンドルに取り込み**、パネルの需要テーブル・年度ラベル・出典表示に使う |
 | `area_map.json` | 境界GeoJSON + フラット化した指標プロパティ（約4.9MB）。**`?url` インポートでファイルURLのみをバンドルに含め、MapLibreにfetchさせる**（メインスレッドでパースしない）。需要は `<区分>_<年>`（値）と `<区分>_r_<年>`（2024年度比）の24プロパティを持つ |
 | `area_index.json` | 選択・bbox解決用の軽量インデックス（`area_code`・`boundary_source`・bboxのみ）。**バンドルに取り込み**、地図の表示状態に依存せず区域選択を解決する |
+| `facility_summary.json` | 医療機関の区域別件数＋21指標の定義＋`value_status` のラベル＋出典（約38KB）。**バンドルに取り込み**、shard取得前でも件数を出せるようにし、出典欄と指標ラベルの正本にする |
+| `public/facilities/<区域コード>.json` × 339 | 区域ごとの医療機関の全データ（21指標＋機能＋座標）。**バンドルせず、区域を選んだときに1本だけfetchする**（合計6.8MB・gzipで中央値2.2KB／最大24KB） |
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
 
@@ -141,7 +143,8 @@ PYTHONIOENCODING=utf-8 python tools/build_area_boundaries.py     # → area_boun
 
 # 可視化サイト向け表示用データセット（→ area_indicators_R7.json）
 PYTHONIOENCODING=utf-8 python tools/build_web_data.py
-PYTHONIOENCODING=utf-8 python tools/build_web_demand.py  # → area_demand_R7.json（医療需要推計）
+PYTHONIOENCODING=utf-8 python tools/build_web_demand.py      # → area_demand_R7.json（医療需要推計）
+PYTHONIOENCODING=utf-8 python tools/build_web_facilities.py  # → area_facilities_R7.json（医療機関×21指標）
 
 # テスト
 pytest
@@ -178,7 +181,12 @@ npm run typecheck  # tsc --noEmit のみ
 8. **`web/src/generated/` はGit管理外なので、それを読む npm script には必ず `pre*` フックを付ける**: `predev`・`prebuild`・`pretypecheck` が `sync-data` を呼ぶ。付け忘れると手元（生成物が残っている）では通り、まっさらなチェックアウト＝CI初回だけ落ちる。**`web/` に新しい script を足すときは、生成物を必要とするか確認すること。** `npm run test`（vitest）には `pre*` が**無い**ので、**テストから `src/generated/*` を import してはいけない**（インラインのフィクスチャで書く）。
 9. **年度のような可変軸を地図に載せる指標は、分位ではなく固定境界にする**（M4）: 分位だと年度を切り替えるたびに閾値が動き、同じ値が別の色になって時系列の比較にならない。需要の2024年度比は `DEMAND_RATIO_BIN_EDGES = [0.67, 0.83, 0.95, 1.05, 1.2, 1.5]`（1.0中心・ほぼ乗法対称）に固定し、在宅（実データ0.76〜2.02倍）・外来（0.51〜1.23倍）の全年度を1つのスケールで覆っている。
 10. **`area_map.json` のフラットなプロパティ名は `web/scripts/lib/merge.mjs`（生成側）と `web/src/lib/metrics.ts`（読み側）の2箇所に分かれる**（M4）: どちらもキー生成関数（`demandValueKey`/`demandRatioKey`）を export し、**両者が同じ文字列を返すことを vitest で検証**している。片方だけ変えると型エラーにならず、地図が無色になるだけで静かに壊れる。
-11. **表示用JSONを増やすと metadata の形は揃わない**（M4）: `area_demand_R7.json` は原典が2シートあるため `source_sheet`・`original_title` が**配列**、入力CSVが2本あるため `processing.caveat` が**オブジェクト**（`area_indicators_R7.json` はどちらも文字列）。`types.ts` で `AreaIndicators*` 型を使い回さず別型にすること。**React はオブジェクトをそのまま描画できない**ので、出典表示で必ず踏む。
+11. **表示用JSONを増やすと metadata の形は揃わない**（M4）: `area_demand_R7.json` は原典が2シートあるため `source_sheet`・`original_title` が**配列**、入力CSVが2本あるため `processing.caveat` が**オブジェクト**（`area_indicators_R7.json` はどちらも文字列）。`types.ts` で `AreaIndicators*` 型を使い回さず別型にすること。**React はオブジェクトをそのまま描画できない**ので、出典表示で必ず踏む。`area_facilities_R7.json` はさらに形が違い、`source`（001723127.xlsx由来）に加えて **`geo_linkage_source`（P04名寄せ由来で `source_file`/`source_sha256` を持たない別の形）を並置**し、`processing.caveat` は入力CSV4本ぶんの4キーを持つ。
+12. **数MB規模の表示用JSONは「1区域1行」の決定的フォーマットで出す**（M5後半）: `area_facilities_R7.json` は compact な一行JSONだと6.6MB、`indent=2` だと15.1MB。前者は git diff が全く読めず「再生成でどの区域が変わったか」を追えない。`metadata`/`metrics` だけ `indent=2` にし、`areas` は要素ごとに1行の compact JSON として書く（`build_web_facilities.py` の `dump_json()`）。サイズは compact とほぼ同じで、区域単位の差分が読める。**独自整形は決定的にすること**（バイト一致の再現性テストが前提）。
+13. **遅延fetchする生成物は `web/public/` に置き、URLは `import.meta.env.BASE_URL` から組む**（M5後半）: `import.meta.glob('...', {query:'?url', eager:true})` は一見きれいだが、(a) Vite は既定で4KB未満の asset を base64 で JS にインライン化するため小さい shard が初期JSに埋め込まれ、(b) URLを得るのに `import: 'default'` が要り、(c) 339件ぶんのURL表が初期JSに載る。`public/` なら Vite が dist へコピーするだけ。ただし `base: './'` なので**絶対パス `/facilities/…` を書くと GitHub Pages のサブパスで404になる**。また `sync-data` は書き出し前にディレクトリを一掃すること（区域が減ったとき古い shard が dist に残る）。
+14. **区域切替の競合状態は `AbortController` だけでは潰せない**（M5後半）: (a) キャッシュヒット時はそもそも fetch が起きず、(b) `abort()` 時点でネットワーク取得が既に完了していれば `.then` が先に解決しうる。**応答を反映する直前に「今も同じ区域が選ばれているか」を確認する**こと（`facilityShard.ts` の `createFacilityShardLoader`）。この判定を React から切り離した純関数の状態機械にしておくと、jsdom無しの vitest でもテストできる。
+15. **HTMLテーブルの展開行は他の行と列幅を共有する**（M5後半）: 施設一覧の折りたたみを `<tr><td colSpan>` で作ると、数値列（`white-space: nowrap`）の幅に引きずられて、幅360pxのサイドパネルの外へ内容が押し出される。`tsc`・vitest・`vite build` はどれも検出せず、**実機で見て初めて分かる**。`position: sticky; left: 0` と幅の上限で閉じ込める。
+16. **`mousemove` をレイヤごとに複数登録すると、どちらが最後に状態を書くかがレイヤ登録順に依存する**（M5後半）: 施設ポイントは区域ポリゴンの真上に乗るので同じ座標で両方がヒットし、ツールチップが二重に出うる。**単一の `mousemove` で `queryRenderedFeatures` を優先順に呼び、常にどちらか一方だけを選ぶ**（既存の `click` ハンドラと同じ書き方）。canvas外へ一気に抜けた場合の保険として `mouseout` も要る。
 
 ## ドキュメント
 
@@ -217,4 +225,12 @@ npm run typecheck  # tsc --noEmit のみ
 - 設計方針は「マッチ率ではなく誤結合の少なさと監査可能性を最適化する」。`match_status`（状態）・`match_method`（方法）・`reason_code`（理由）・`candidate_count` を分けて出力し、strict（完全一致）だけに絞り込めるようにしてある
 - 踏んだ罠は「外部データとの名寄せ（P04）の罠」節に記録
 
-**未実装**: 流入流出（001723366）のパーサ、M5後半のUI（医療機関ポイント・区域パネルの医療機関一覧）、M6（CSVダウンロード）。
+**M5後半「医療機関UI」完了**:
+- 表示用データセット `tools/build_web_facilities.py` → `data/processed/area_facilities_R7.json`（339区域・11,760施設・**21指標すべて**・約6.8MB）。検証13項目で中断する。`values`/`value_status` を21要素の配列で持ち、`metrics` が並び順を定義する（指標名をキーにしたオブジェクトだと15MB超になる）
+- `web/scripts/sync-data.mjs` が正本を339分割して `web/public/facilities/<区域コード>.json` を書き、区域を選んだときに1本だけfetchする。**21指標を全部持ったまま、一度に全部は読み込まない**（gzipで中央値2.2KB／最大24KB）
+- 区域パネルに医療機関一覧（既定は病床数6列、行を展開するとその施設の21指標すべてを5グループで表示）。グループ分けは `metrics[].metric` の文字列から機械的に導き、未知の指標は「その他」へ落として消さない
+- 欠測は `—` ＋ 日本語ラベル（`title` と視覚的に隠したテキスト）で `'*'`（NDB非公表）・`'-'`・`未報告`・空欄を区別する。**座標を持たない1,516件も一覧には出す**（「地図に表示なし」バッジ付き。`doc/REQUIREMENTS.md` §4.3「位置の推測はしない」）
+- 地図には**選択中の区域の施設のみ**を点で表示する（全国10,244点の一括表示はしない。要件 §3.2 のドリルダウンに沿い、座標の二重保持と低ズームでの過密表示を避けるため）。円の半径は病床数、病床数が欠測の施設も最小半径で描く（欠測を0床にしない）
+- 実装で判明した罠は「可視化実装で判明した罠」節の12〜16に記録
+
+**未実装**: 流入流出（001723366）のパーサ、M6（CSVダウンロード）。
