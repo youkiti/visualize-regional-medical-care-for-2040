@@ -170,11 +170,18 @@ export function formatKm2(km2: number): string {
  * Format a demand change ratio (value(year) / value(baseline_year)) as a
  * signed percentage, e.g. 1.304 -> "+30.4%", 0.828 -> "-17.2%". Same
  * no-sign-for-zero convention as formatDiff.
+ *
+ * The sign is decided from the *rounded* figure, not the raw one: a change too
+ * small to survive rounding must read "0.0%", never "-0.0%" (which shows a
+ * minus sign next to a zero and reads as a decrease the digits don't support).
+ * Real data hits this — 峡南・在宅2050年度 (-0.037%) と
+ * 宮崎東諸県・外来2035年度 (-0.008%)。
  */
 export function formatChangeRatio(ratio: number): string {
-  const pct = (ratio - 1) * 100;
-  const sign = pct > 0 ? '+' : '';
-  return `${sign}${pct.toFixed(1)}%`;
+  // toFixed stays the single rounding authority; only the sign is re-derived.
+  const rounded = ((ratio - 1) * 100).toFixed(1);
+  if (Number(rounded) === 0) return '0.0%';
+  return `${Number(rounded) > 0 ? '+' : ''}${rounded}%`;
 }
 
 /** レセプト件数/月 の表示用整形（在宅・外来の医療需要推計）。 */
