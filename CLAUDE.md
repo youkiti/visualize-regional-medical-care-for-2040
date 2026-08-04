@@ -56,6 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ローカル: Windows / 日本語ファイル名あり。Pythonでコンソール出力が文字化けする場合は `PYTHONIOENCODING=utf-8` を付ける。
 - Claude Code cloud: Ubuntu。外部ドメイン（`www.mhlw.go.jp`・`nlftp.mlit.go.jp`）へのアクセスは claude.ai の環境設定 Network access（Custom）で許可する。リポジトリ内の設定ファイルでは制御できない。
 - `SHA256SUMS` は LF 固定（`.gitattributes` で管理）。CRLF になると `sha256sum -c` が失敗する。CI（`.github/workflows/verify-data.yml`）が push ごとに完全性を検証する。
+- **`data/processed/` の加工データも `.gitattributes` で LF 固定にする**（現在 `*.geojson`・`*.csv`・`*.json`）。ルートに `* text=auto` があるため指定を忘れると Windows 作業ツリーで CRLF になり、「再生成物がコミット済みファイルとバイト一致するか」の再現性テストが Windows でだけ壊れる。**新しい出力形式を追加するときは併せて追記すること。**
 
 ### 実行コマンド
 
