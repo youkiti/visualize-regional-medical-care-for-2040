@@ -48,6 +48,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **結合キーの罠**: 構想区域コードは病床系ファイルでは数値 `101`、需要推計ではゼロ埋め文字列 `"0101"`。突合時に正規化が必要。
 - **単位の罠**: 人口が「万人」単位の箇所（基礎情報欄）と実数の箇所（需要推計）が混在。
 - 病床機能報告の集計値と「将来の必要量」は計算方法が異なり、厚労省自身が単純比較を戒めている（各ファイル冒頭の注記参照）。可視化での併記時は注記を添える。
+- **R6の列ずれの罠**: `001722915.xlsx`（①都道府県の病床数等）は R6/R7 で「帳票の行構造（15行×48ブロック）」は同一だが、**実績年の列数が異なる**（R6は2015・2018〜2024年の8年分、R7はそれに2025年実績が加わり9年分）。そのため見込量・必要数の列位置が1列ずれ、見込量の対象年自体も異なる（R6=2025年見込量／R7=2026年見込量）。したがって列は位置（列番号）ではなく、サブヘッダー行の文字列（`2015実績`・`2026見込量`等）から解決すること（`tools/parse_prefecture_beds.py` 参照）。他の帳票ファイル（②構想区域の病床数等等）でも同様の罠がないか、パーサ実装時に確認する。
 
 ## 環境
 
@@ -56,10 +57,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Claude Code cloud: Ubuntu。外部ドメイン（`www.mhlw.go.jp`・`nlftp.mlit.go.jp`）へのアクセスは claude.ai の環境設定 Network access（Custom）で許可する。リポジトリ内の設定ファイルでは制御できない。
 - `SHA256SUMS` は LF 固定（`.gitattributes` で管理）。CRLF になると `sha256sum -c` が失敗する。CI（`.github/workflows/verify-data.yml`）が push ごとに完全性を検証する。
 
+### 実行コマンド
+
+- パーサ実行（都道府県データ → `data/processed/prefecture_*.csv` を生成）:
+  ```bash
+  PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py
+  ```
+- テスト（リポジトリルートで実行。`tools/lib/` の共通基盤と各パーサを検証）:
+  ```bash
+  pytest
+  ```
+  CI（`.github/workflows/test-pipeline.yml`）が push・pull_request ごとに実行する。
+
 ## ドキュメント
 
 ドキュメントは `doc/` に置く（README・CLAUDE.md はルート）。要件定義は `doc/REQUIREMENTS.md`、データ来歴は `doc/DATA_SOURCES.md`。
 
 ## 現状
 
-要件定義済み（`doc/REQUIREMENTS.md`）。可視化コード・ビルド設定は未実装。技術スタック導入時は、実行・ビルド・テストのコマンドをこのファイルに追記すること。
+要件定義済み（`doc/REQUIREMENTS.md`）。M1「パーサ基盤 + 都道府県データ」完了: 各パーサが共用する基盤（`tools/lib/provenance.py` = 完全性検証・由来メタデータ付きCSV出力、`tools/lib/codes.py` = コード正規化）と、都道府県別病床数のパーサ（`tools/parse_prefecture_beds.py`）・pytest によるテスト（`tools/tests/`）・CI（`.github/workflows/test-pipeline.yml`）を実装済み。構想区域（001723349）・医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、可視化サイト本体は未実装。技術スタック導入時は、実行・ビルド・テストのコマンドをこのファイルに追記すること。

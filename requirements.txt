@@ -2,3 +2,6 @@ openpyxl>=3.1,<4
 
 # ローカルのデータ取得（tools/fetch_ksj_geodata.py）のみで使用。クラウドでは不要
 selenium>=4.30,<5
+
+# パーサ・共通ライブラリ（tools/lib/）のテスト実行用
+pytest>=8,<10

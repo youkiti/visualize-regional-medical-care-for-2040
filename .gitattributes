@@ -7,6 +7,12 @@ SHA256SUMS text eol=lf
 # 加工GeoJSONは全環境でLF固定（ファイル内metadataのハッシュ検証を安定させる）
 *.geojson text eol=lf
 
+# 加工CSVも全環境でLF固定（Windows作業ツリーでCRLFになるとバイト一致の再現性テストが壊れるため）
+*.csv text eol=lf
+
+# 加工データのmeta.jsonも同じ理由でLF固定（将来バイト比較する場合に備える）
+*.json text eol=lf
+
 *.xlsx binary
 *.pdf binary
 *.zip binary
