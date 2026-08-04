@@ -38,8 +38,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 座標系はいずれも JGD2011 地理座標（EPSG:6668）。zip内にシェープファイル・GeoJSON・GML(XML) を同梱（A38 は `_1`=一次、`_2`=二次、`_3`=三次医療圏）。
 - 二次医療圏コード `A38b_003` はゼロ埋め4桁文字列（例 `"0101"`）で需要推計ファイルと同形式。病床系ファイルの数値コードとは下記「結合キーの罠」の正規化が必要。
-- A38 は令和2年度時点の二次医療圏。R7 の339構想区域と区割りが一致しない可能性があるため突合時に検証する。
-- 可視化用の軽量二次医療圏GeoJSON（`data/processed/iryoken2_A38-20.geojson`、335医療圏・約6.7MB・表示専用）は `python tools/build_iryoken2_geojson.py` で再生成できる（要 Node.js、mapshaper を npx で取得。実行時に元zipのSHA-256を検証）。由来メタデータはファイル内 `metadata` に埋め込み済み。
+- **`A38-20_1`（一次医療圏）は市区町村単位のポリゴンで、`A38a_001`=行政区域コード（5桁）・`A38a_002`=市区町村名・`A38a_003`=所属する二次医療圏コード（4桁）を持つ**。市区町村を任意の区域単位へディゾルブし直す入口になる（`tools/build_area_boundaries.py` が利用）。
+- **A38 と R7 の区割差異は M2 で決着済み**: 339構想区域のうち331区域はコード・名称とも完全一致し、差異は三重県のみ（A38の4二次医療圏がR7では8構想区域へ細分化）。検証の全内容と根拠は `doc/JOIN_VERIFICATION.md`（`tools/verify_area_join.py` が生成）にある。
+- 可視化用GeoJSONは2つある。用途を取り違えないこと:
+  - `data/processed/iryoken2_A38-20.geojson`（335二次医療圏・約6.7MB）— A38-20_2 の忠実な抽出物。`tools/build_iryoken2_geojson.py` で再生成。突合検証の入力。
+  - `data/processed/area_boundaries_R7.geojson`（**339構想区域**・約4.5MB）— 可視化で使うのはこちら。`tools/build_area_boundaries.py` で再生成。全339区域を `A38-20_1` から同一条件でディゾルブしており、**三重県8区域の境界は国土数値情報の公表物ではなく市区町村からの合成派生物**（各フィーチャの `boundary_source` で区別できる）。
+- いずれも要 Node.js（mapshaper を npx で取得）。実行時に元zipのSHA-256を検証する。由来メタデータはファイル内 `metadata` に埋め込み済み。
+
+### mie/ — 三重県公式資料
+
+| パス | 内容 |
+|---|---|
+| mie/001092203.pdf | 「資料４ 第８次三重県医療計画における二次医療圏の設定について」（三重県医療政策課）。コミット済み |
+
+9ページ「現行の二次医療圏・構想区域」が、三重県の4二次医療圏と8構想区域の対応・構成市町（29市町）を示す一次資料。三重県はこの両方を**併存**させており、構想区域は二次医療圏の細分（入れ子構造）。機械可読化した対応表は `data/reference/mie_area_municipalities.csv`（`tools/build_mie_area_municipalities.py` が生成し、A38の構成市区町村・医療機関所在地との5系統の突合で転記を検証する）。
 
 ### パース時の注意（帳票形式のExcel）
 
@@ -48,32 +60,63 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **結合キーの罠**: 構想区域コードは病床系ファイルでは数値 `101`、需要推計ではゼロ埋め文字列 `"0101"`。突合時に正規化が必要。
 - **単位の罠**: 人口が「万人」単位の箇所（基礎情報欄）と実数の箇所（需要推計）が混在。
 - 病床機能報告の集計値と「将来の必要量」は計算方法が異なり、厚労省自身が単純比較を戒めている（各ファイル冒頭の注記参照）。可視化での併記時は注記を添える。
-- **R6の列ずれの罠**: `001722915.xlsx`（①都道府県の病床数等）は R6/R7 で「帳票の行構造（15行×48ブロック）」は同一だが、**実績年の列数が異なる**（R6は2015・2018〜2024年の8年分、R7はそれに2025年実績が加わり9年分）。そのため見込量・必要数の列位置が1列ずれ、見込量の対象年自体も異なる（R6=2025年見込量／R7=2026年見込量）。したがって列は位置（列番号）ではなく、サブヘッダー行の文字列（`2015実績`・`2026見込量`等）から解決すること（`tools/parse_prefecture_beds.py` 参照）。他の帳票ファイル（②構想区域の病床数等等）でも同様の罠がないか、パーサ実装時に確認する。
+- **R6の列ずれの罠**: `001722915.xlsx`（①都道府県の病床数等）は R6/R7 で「帳票の行構造（15行×48ブロック）」は同一だが、**実績年の列数が異なる**（R6は2015・2018〜2024年の8年分、R7はそれに2025年実績が加わり9年分）。そのため見込量・必要数の列位置が1列ずれ、見込量の対象年自体も異なる（R6=2025年見込量／R7=2026年見込量）。したがって列は位置（列番号）ではなく、サブヘッダー行の文字列（`2015実績`・`2026見込量`等）から解決すること（`tools/parse_prefecture_beds.py` 参照）。**`001723349.xlsx`（②構想区域の病床数等）にも同じ罠がある**ことを M2 で確認済み。未実装のパーサでも必ず確認すること。
+- **①と②は帳票のブロック構造が完全に同一**（3行目開始・1ブロック15行・ブロック内の行オフセットも同じ）。違いはブロック数（48 対 339）、A列のブロック番号の起点（0始まり＝全国が0 対 1始まり）、②が使う追加行（構想区域コード・推計流出入患者割合）だけ。走査の共通部分は `tools/lib/layout.py`（検証ユーティリティ）と `tools/lib/block_report.py`（ブロック走査・ヘッダーからの列解決）にあり、**新しい帳票パーサはこの2つの上に載せること**。行オフセットの意味づけと項目抽出は各パーサ側に残す設計。
+- **`001723349.xlsx` の「2024実績」列は「2025実績」列の複製**（339区域×5機能=1695セル全てで同一）。①都道府県版では両者が別値であり、②を都道府県へ集計して①と突合すると2585キー中230キーが2024年だけ不一致になる。**厚労省の公表物側の問題**であり、値は原典どおり出力して `meta.json` の `known_issues` に記録してある。**可視化では構想区域レベルの2024年実績を使わないこと。**
+- **センチネル値の罠**: `001723349.xlsx` の推計流出/流入患者割合は、三重県の8区域（2405〜2412）でのみ数値ではなく文字列 `'XXX'`（未算出）。派生比率列には `'-'` も現れる。数値前提で `int()`/`float()` すると静かに壊れるため、非数値は必ず検出して分岐すること。
+- **R6の②は `parse_sheet()` では読めない**: 上記の列ずれに加え、(1) 推計流出入患者割合ではなく「（一般病床患者流出入）」という単一値をQ列(17)の別の行位置に持つ（別概念）、(2) 原典に実績セルの欠測が1件ある（ブロック2「南檜山」高度急性期の2015実績が空）。`SOURCES` に R6 を定義しているのは列ずれ追随のヘッダーレベル回帰テスト用。
 
 ## 環境
 
 - Python 3.11 + openpyxl（依存は `requirements.txt` で管理）。
 - ローカル: Windows / 日本語ファイル名あり。Pythonでコンソール出力が文字化けする場合は `PYTHONIOENCODING=utf-8` を付ける。
-- Claude Code cloud: Ubuntu。外部ドメイン（`www.mhlw.go.jp`・`nlftp.mlit.go.jp`）へのアクセスは claude.ai の環境設定 Network access（Custom）で許可する。リポジトリ内の設定ファイルでは制御できない。
+- Claude Code cloud: Ubuntu。外部ドメイン（`www.mhlw.go.jp`・`nlftp.mlit.go.jp`・`www.pref.mie.lg.jp`）へのアクセスは claude.ai の環境設定 Network access（Custom）で許可する。リポジトリ内の設定ファイルでは制御できない。
 - `SHA256SUMS` は LF 固定（`.gitattributes` で管理）。CRLF になると `sha256sum -c` が失敗する。CI（`.github/workflows/verify-data.yml`）が push ごとに完全性を検証する。
-- **`data/processed/` の加工データも `.gitattributes` で LF 固定にする**（現在 `*.geojson`・`*.csv`・`*.json`）。ルートに `* text=auto` があるため指定を忘れると Windows 作業ツリーで CRLF になり、「再生成物がコミット済みファイルとバイト一致するか」の再現性テストが Windows でだけ壊れる。**新しい出力形式を追加するときは併せて追記すること。**
+- **加工データ・生成ドキュメントは `.gitattributes` で LF 固定にする**（現在 `*.geojson`・`*.csv`・`*.json`・`doc/JOIN_VERIFICATION.md`）。ルートに `* text=auto` があるため指定を忘れると Windows 作業ツリーで CRLF になり、「再生成物がコミット済みファイルとバイト一致するか」の再現性テストが Windows でだけ壊れる。**新しい出力形式（生成される Markdown レポート等を含む）を追加するときは併せて追記すること。**
+- **生成物には生成日時を埋め込まない**。埋め込むと再生成のたびに差分が出て、バイト一致の再現性テストが翌日に壊れる。由来の担保には元データのSHA-256（安定値）を使う。CSVの `meta.json` は `processing.date` を持つが、再現性テストはこの項目を比較対象から除外している。
 
 ### 実行コマンド
 
-- パーサ実行（都道府県データ → `data/processed/prefecture_*.csv` を生成）:
-  ```bash
-  PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py
-  ```
-- テスト（リポジトリルートで実行。`tools/lib/` の共通基盤と各パーサを検証）:
-  ```bash
-  pytest
-  ```
-  CI（`.github/workflows/test-pipeline.yml`）が push・pull_request ごとに実行する。
+いずれもリポジトリルートで実行する。`data/processed/` の成果物はコミット済みで、再現性テストが「再生成物がコミット済みファイルとバイト一致するか」を検証するため、**元データを差し替えたら再実行してコミットし直すこと**。
+
+```bash
+# パーサ（生データ → data/processed/*.csv）
+PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py     # 都道府県 → prefecture_*.csv
+PYTHONIOENCODING=utf-8 python tools/parse_area_beds.py           # 構想区域 → area_*.csv
+
+# 三重県の市町対応表（→ data/reference/mie_area_municipalities.csv）
+PYTHONIOENCODING=utf-8 python tools/build_mie_area_municipalities.py
+
+# 突合検証（→ data/processed/area_geo_join.csv と doc/JOIN_VERIFICATION.md）
+PYTHONIOENCODING=utf-8 python tools/verify_area_join.py
+
+# 境界GeoJSON（要 Node.js・要 ksj/A38-20 zip = Git管理外。CIでは実行されない）
+PYTHONIOENCODING=utf-8 python tools/build_iryoken2_geojson.py    # → iryoken2_A38-20.geojson（335二次医療圏）
+PYTHONIOENCODING=utf-8 python tools/build_area_boundaries.py     # → area_boundaries_R7.geojson（339構想区域・可視化用）
+
+# テスト
+pytest
+```
+
+`doc/JOIN_VERIFICATION.md` は `tools/verify_area_join.py` の**生成物**。手で編集しないこと。
+
+CI は push・pull_request ごとに `test-pipeline.yml`（pytest）と `verify-data.yml`（生データのSHA-256検証）を実行する。`ksj/A38-20` はGit管理外のためCIには存在しない。**この zip に依存するスクリプト・テストを書くときは、CIで落ちないよう `skipif` でスキップ可能にすること。**
 
 ## ドキュメント
 
-ドキュメントは `doc/` に置く（README・CLAUDE.md はルート）。要件定義は `doc/REQUIREMENTS.md`、データ来歴は `doc/DATA_SOURCES.md`。
+ドキュメントは `doc/` に置く（README・CLAUDE.md はルート）。要件定義は `doc/REQUIREMENTS.md`、データ来歴は `doc/DATA_SOURCES.md`、構想区域と境界の突合検証は `doc/JOIN_VERIFICATION.md`（生成物）。
 
 ## 現状
 
-要件定義済み（`doc/REQUIREMENTS.md`）。M1「パーサ基盤 + 都道府県データ」完了: 各パーサが共用する基盤（`tools/lib/provenance.py` = 完全性検証・由来メタデータ付きCSV出力、`tools/lib/codes.py` = コード正規化）と、都道府県別病床数のパーサ（`tools/parse_prefecture_beds.py`）・pytest によるテスト（`tools/tests/`）・CI（`.github/workflows/test-pipeline.yml`）を実装済み。構想区域（001723349）・医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、可視化サイト本体は未実装。技術スタック導入時は、実行・ビルド・テストのコマンドをこのファイルに追記すること。
+要件定義済み（`doc/REQUIREMENTS.md`）。
+
+**M1「パーサ基盤 + 都道府県データ」完了**: 各パーサが共用する基盤（`tools/lib/provenance.py` = 完全性検証・由来メタデータ付きCSV出力、`tools/lib/codes.py` = コード正規化）と、都道府県別病床数のパーサ（`tools/parse_prefecture_beds.py`）・pytest によるテスト（`tools/tests/`）・CI（`.github/workflows/test-pipeline.yml`）。
+
+**M2「構想区域データ + 境界突合」完了**:
+- 帳票走査の共通基盤を `tools/lib/layout.py`・`tools/lib/block_report.py` に抽出（都道府県パーサも載せ替え済み）
+- 構想区域パーサ `tools/parse_area_beds.py` → `area_beds.csv`（18,645行）・`area_bed_report_rate.csv`（3,051行）・`area_basic.csv`（339行）
+- 突合検証 `tools/verify_area_join.py` → `doc/JOIN_VERIFICATION.md`・`area_geo_join.csv`。**331区域一致／三重県8区域のみ差異**という結論と全根拠はこのレポートにある
+- 三重県の市町対応表を公式一次資料（`mie/001092203.pdf`）から確定し、5系統の突合で転記を検証（`tools/build_mie_area_municipalities.py`）
+- 可視化用の339構想区域境界 `data/processed/area_boundaries_R7.geojson`（`tools/build_area_boundaries.py`）
+
+**未実装**: 医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、可視化サイト本体（Vite + React + MapLibre → GitHub Pages）。技術スタック導入時は、実行・ビルド・テストのコマンドをこのファイルに追記すること。
