@@ -78,7 +78,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **①と②は帳票のブロック構造が完全に同一**（3行目開始・1ブロック15行・ブロック内の行オフセットも同じ）。違いはブロック数（48 対 339）、A列のブロック番号の起点（0始まり＝全国が0 対 1始まり）、②が使う追加行（構想区域コード・推計流出入患者割合）だけ。走査の共通部分は `tools/lib/layout.py`（検証ユーティリティ）と `tools/lib/block_report.py`（ブロック走査・ヘッダーからの列解決）にあり、**新しい帳票パーサはこの2つの上に載せること**。行オフセットの意味づけと項目抽出は各パーサ側に残す設計。
 - **`001723349.xlsx` の「2024実績」列は「2025実績」列の複製**（339区域×5機能=1695セル全てで同一）。①都道府県版では両者が別値であり、②を都道府県へ集計して①と突合すると2585キー中230キーが2024年だけ不一致になる。**厚労省の公表物側の問題**であり、値は原典どおり出力して `meta.json` の `known_issues` に記録してある。**可視化では構想区域レベルの2024年実績を使わないこと。**
 - **センチネル値の罠**: `001723349.xlsx` の推計流出/流入患者割合は、三重県の8区域（2405〜2412）でのみ数値ではなく文字列 `'XXX'`（未算出）。派生比率列には `'-'` も現れる。数値前提で `int()`/`float()` すると静かに壊れるため、非数値は必ず検出して分岐すること。
+- **医療機関個票（001723127）は「1構想区域＝1シート」の339シート構成**で、他の帳票（1シート内の繰り返しブロック）とは逆。`block_report.py` は使わない。各シートは1〜9行が区域サマリ、10行目以降が医療機関表（14行目からA列連番、シートにより1〜333件）。ヘッダーは11〜13行の3段＋結合セルなので、**列は (11行,12行,13行) の文字列の三つ組で解決する**（部分一致だと「急性期」が「高度急性期」を拾う）。
+- **この帳票のセンチネルは `'XXX'` ではなく `'*'` と `'未報告'`**: `'*'` はNDBガイドラインによる非公表（診療実績4列のみ、3,312セル）、`'未報告'` は病床機能報告そのものが未報告（病床数「休棟中等含む計」列のみ、162セル。この場合は所在地欄まで空になる）。`facility_observations.csv` は値と別に `value_status`（observed/source_dash/blank/not_disclosed/not_reported）を持たせて区別している。**欠測を真偽値1本で持たせないこと。**
+- **区域サマリの「④一般・療養病床計」は休棟中等を"除く"が、医療機関表の「③一般・療養病床」は"含む"**: 両者を突合すると339区域中304区域で不一致になるが、差は常に休棟中等の合計と一致する**定義差でバグではない**。機能別（高度急性期〜慢性期）は全区域で一致する。なお医療機関数（一般病院＋有床診療所）は78区域で個票行数と合わず、うち76区域は未報告医療機関の件数で説明できる（残り2区域は原因不明。`meta.json` の `known_issues` に記録済み）。
+- **医療機関には恒久IDが無い**: `record_id` は `R7-<区域コード>-<原典行番号>` で、**原典の行位置（病床数降順）由来**。公表年度が変われば同じIDが別施設を指しうるので、年度間比較のキーには使えない。名称からハッシュIDを作るのも不可（改称で変わり同名施設で衝突する）。
 - **R6の②は `parse_sheet()` では読めない**: 上記の列ずれに加え、(1) 推計流出入患者割合ではなく「（一般病床患者流出入）」という単一値をQ列(17)の別の行位置に持つ（別概念）、(2) 原典に実績セルの欠測が1件ある（ブロック2「南檜山」高度急性期の2015実績が空）。`SOURCES` に R6 を定義しているのは列ずれ追随のヘッダーレベル回帰テスト用。
+
+### 外部データとの名寄せ（P04）の罠
+
+医療機関に座標を与える `tools/build_facility_geo_linkage.py`（M5）で踏んだもの。結論と全実測値は `doc/FACILITY_LINKAGE.md`（生成物）にある。
+
+- **P04には都道府県コードも市区町村コードも無い**（住所文字列のみ、しかも原則として都道府県名を含まない）。市区町村名だけでは同名市区町村（府中市＝東京/広島、伊達市＝北海道/福島）を切り分けられないので、**区域の確定は住所ではなく点-多角形判定**（`area_boundaries_R7.geojson` に対するレイキャスティング）で行う。
+- **政令指定都市の住所は市名を省いて区から始まることがある**（実測3,178件）: `港北区小机町…` は `横浜市港北区` と前方一致しない。**区名がExcel側市区町村の末尾と一致するか**も見ること。これを入れないと神奈川県のマッチ率が91%→53%まで落ち、地図が「神奈川には病院が少ない」という誤った印象を与える。
+- **法人格語の除去は、名称を施設種別語だけに削ってしまうことがある**: `厚生連クリニック` → `クリニック` となり `…ロビンの空クリニック` の末尾と一致して誤結合する。**除去後に種別語しか残らないなら除去しない**こと（残余が1文字でも残るなら除去してよい。`医療法人社団森クリニック`→`森クリニック` は正しい）。
+- **`p04_beds` は精神・結核病床を含む総病床数で、Excel（病床機能報告）の一般・療養病床とは定義が違う**: 突合の妥当性検証には使えず（乖離228件の大半は精神科病院）、画面で並べて見せてもいけない。
+- 自動採用は「正規化名の完全一致または接尾一致」＋「区域ポリゴン内で一意」＋「市区町村整合」＋「一対一制約」を**全て**満たす場合のみ。あいまい一致（`candidate_only`）には座標を与えない（`doc/REQUIREMENTS.md` §4.3「位置の推測はしない」）。
 
 ## 環境
 
@@ -98,12 +112,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py     # 都道府県 → prefecture_*.csv
 PYTHONIOENCODING=utf-8 python tools/parse_area_beds.py           # 構想区域 → area_*.csv
 PYTHONIOENCODING=utf-8 python tools/parse_demand_forecast.py     # 構想区域別医療需要推計 → demand_*.csv
+PYTHONIOENCODING=utf-8 python tools/parse_facility_beds.py       # 医療機関個票（339シート）→ facility_*.csv
 
 # 三重県の市町対応表（→ data/reference/mie_area_municipalities.csv）
 PYTHONIOENCODING=utf-8 python tools/build_mie_area_municipalities.py
 
 # 突合検証（→ data/processed/area_geo_join.csv と doc/JOIN_VERIFICATION.md）
 PYTHONIOENCODING=utf-8 python tools/verify_area_join.py
+
+# 医療機関とP04（国土数値情報）の名寄せ（→ facility_geo_linkage.csv と doc/FACILITY_LINKAGE.md）
+PYTHONIOENCODING=utf-8 python tools/build_facility_geo_linkage.py
 
 # 境界GeoJSON（要 Node.js・要 ksj/A38-20 zip = Git管理外。CIでは実行されない）
 PYTHONIOENCODING=utf-8 python tools/build_iryoken2_geojson.py    # → iryoken2_A38-20.geojson（335二次医療圏）
@@ -152,7 +170,7 @@ npm run typecheck  # tsc --noEmit のみ
 
 ## ドキュメント
 
-ドキュメントは `doc/` に置く（README・CLAUDE.md はルート）。要件定義は `doc/REQUIREMENTS.md`、データ来歴は `doc/DATA_SOURCES.md`、構想区域と境界の突合検証は `doc/JOIN_VERIFICATION.md`（生成物）。
+ドキュメントは `doc/` に置く（README・CLAUDE.md はルート）。要件定義は `doc/REQUIREMENTS.md`、データ来歴は `doc/DATA_SOURCES.md`、構想区域と境界の突合検証は `doc/JOIN_VERIFICATION.md`（生成物）、医療機関とP04の名寄せ結果は `doc/FACILITY_LINKAGE.md`（生成物）。
 
 ## 現状
 
@@ -181,4 +199,10 @@ npm run typecheck  # tsc --noEmit のみ
 - 配色は病床の過不足率と同じ発散7色を再利用し、境界のみ需要用に固定（罠9参照）
 - 出典表示に需要推計のブロックを追加（原典2シート・入力CSV2本ぶんの注記をすべて表示）
 
-**未実装**: 医療機関（001723127）・流入流出（001723366）のパーサ、M5以降のUI（医療機関ポイント・CSVダウンロード）。
+**M5前半「医療機関パーサ + P04名寄せ」完了**（UIは未着手）:
+- 医療機関パーサ `tools/parse_facility_beds.py` → `facility_basic.csv`（11,760施設）・`facility_observations.csv`（246,960行 = 施設×21指標のlong形式。20.5MB）・`facility_functions.csv`（7,574行）。分割の原則は「1施設1行の識別情報はwide、反復次元を持つものはlong」
+- 名寄せ `tools/build_facility_geo_linkage.py` → `facility_geo_linkage.csv`・`doc/FACILITY_LINKAGE.md`。**11,760件中10,244件（87.1%）に座標を付与**（完全一致9,582＋接尾一致662）。残りは `candidate_only` 656件・`unmatched` 860件で**座標を与えない**
+- 設計方針は「マッチ率ではなく誤結合の少なさと監査可能性を最適化する」。`match_status`（状態）・`match_method`（方法）・`reason_code`（理由）・`candidate_count` を分けて出力し、strict（完全一致）だけに絞り込めるようにしてある
+- 踏んだ罠は「外部データとの名寄せ（P04）の罠」節に記録
+
+**未実装**: 流入流出（001723366）のパーサ、M5後半のUI（医療機関ポイント・区域パネルの医療機関一覧）、M6（CSVダウンロード）。
