@@ -55,12 +55,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
 | `area_indicators.json` | 正本の忠実コピー（改行のみLF正規化）。**バンドルに取り込み**、パネル・検索・分位計算・出典表示に使う |
-| `area_map.json` | 境界GeoJSON + フラット化した指標プロパティ（約4.7MB）。**`?url` インポートでファイルURLのみをバンドルに含め、MapLibreにfetchさせる**（4.7MBをメインスレッドでパースしない） |
+| `area_demand.json` | 需要推計の正本の忠実コピー。**バンドルに取り込み**、パネルの需要テーブル・年度ラベル・出典表示に使う |
+| `area_map.json` | 境界GeoJSON + フラット化した指標プロパティ（約4.9MB）。**`?url` インポートでファイルURLのみをバンドルに含め、MapLibreにfetchさせる**（メインスレッドでパースしない）。需要は `<区分>_<年>`（値）と `<区分>_r_<年>`（2024年度比）の24プロパティを持つ |
 | `area_index.json` | 選択・bbox解決用の軽量インデックス（`area_code`・`boundary_source`・bboxのみ）。**バンドルに取り込み**、地図の表示状態に依存せず区域選択を解決する |
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
@@ -68,7 +69,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### パース時の注意（帳票形式のExcel）
 
 - 需要推計（001728462）以外は**帳票レイアウト**（結合セル・複数行ヘッダー・区域ごとの繰り返しブロック）。`pandas.read_excel` の素朴な読み込みでは崩れるため、位置ベースで抽出する。
-- 001728462 は比較的整形済み: ヘッダーが3〜5行目、データは6行目から。
+- 001728462 は比較的整形済み: **4行目=年度ラベル行**（`2024年度`・`2030年度（現状投影）`…）、**5行目=見出し行**、データは6行目から339行（2シートともレイアウト同一・コード昇順）。年は列位置ではなく4行目の文字列から抽出すること（他の帳票と同じ規律）。**2024年度だけ「（現状投影）」が付かない**ため、解釈せず原文を `year_label` 列に保持している（`tools/parse_demand_forecast.py`）。
+- **需要推計の単位・基準の罠**: 値は「**レセプト件数/月**」であって患者数・人数ではない。人口列も「人口(2024年**度**)」と「人口(2040年)」で年度/年が混在し、さらに `area_basic.csv` の `population_2020`（国勢調査）とは出典自体が別。**画面で併記するときは必ず出典と基準年を書き分けること。**
 - **結合キーの罠**: 構想区域コードは病床系ファイルでは数値 `101`、需要推計ではゼロ埋め文字列 `"0101"`。突合時に正規化が必要。
 - **単位の罠**: 人口が「万人」単位の箇所（基礎情報欄）と実数の箇所（需要推計）が混在。
 - 病床機能報告の集計値と「将来の必要量」は計算方法が異なり、厚労省自身が単純比較を戒めている（各ファイル冒頭の注記参照）。可視化での併記時は注記を添える。
@@ -95,6 +97,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # パーサ（生データ → data/processed/*.csv）
 PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py     # 都道府県 → prefecture_*.csv
 PYTHONIOENCODING=utf-8 python tools/parse_area_beds.py           # 構想区域 → area_*.csv
+PYTHONIOENCODING=utf-8 python tools/parse_demand_forecast.py     # 構想区域別医療需要推計 → demand_*.csv
 
 # 三重県の市町対応表（→ data/reference/mie_area_municipalities.csv）
 PYTHONIOENCODING=utf-8 python tools/build_mie_area_municipalities.py
@@ -108,6 +111,7 @@ PYTHONIOENCODING=utf-8 python tools/build_area_boundaries.py     # → area_boun
 
 # 可視化サイト向け表示用データセット（→ area_indicators_R7.json）
 PYTHONIOENCODING=utf-8 python tools/build_web_data.py
+PYTHONIOENCODING=utf-8 python tools/build_web_demand.py  # → area_demand_R7.json（医療需要推計）
 
 # テスト
 pytest
@@ -132,7 +136,7 @@ npm run typecheck  # tsc --noEmit のみ
 
 ## 可視化実装で判明した罠
 
-`web/` の実装（M3）で踏んだもので、次に同じUIを触る人が必ず再発させる類のもの。
+`web/` の実装（M3・M4）で踏んだもので、次に同じUIを触る人が必ず再発させる類のもの。
 
 1. **MapLibre の `querySourceFeatures` は表示範囲外のタイルを見ない**: 区域検索など「今表示されていない区域」を選ぶ用途には使えない。選択と bbox は別途バンドルしたインデックス（`area_index.json`）から解決する。
 2. **`step` 式の stop は厳密昇順でなければならない**: 分位境界は実データで重複する（高度急性期の実績は339区域中69区域が0床なので下位2境界が同値）。重複を潰して区分数を減らし、地図と凡例を同じ境界から生成すること。
@@ -141,7 +145,10 @@ npm run typecheck  # tsc --noEmit のみ
 5. **React 18 StrictMode では map が「生成→破棄→生成」される**: 破棄済みインスタンスのイベントを弾かないと開発時に正常な地図の上へ誤ったエラー表示が出る。クリーンアップで ref を先に null にしてから `map.remove()` し、ハンドラ側で現行インスタンスか確認する。
 6. **maplibre-gl の型定義は `error` イベントを DOM の `ErrorEvent` に解決するため `e.sourceId` が型に無い**（実行時には存在する）。`tsconfig` は `allowJs: true` が必要（vitest から `scripts/lib/*.mjs` を import するため）。
 7. **MapLibre のフィーチャプロパティはフラットなスカラーのみにする**: クリックイベントで受け取る properties はネストしたオブジェクトが文字列化される。
-8. **`web/src/generated/` はGit管理外なので、それを読む npm script には必ず `pre*` フックを付ける**: `predev`・`prebuild`・`pretypecheck` が `sync-data` を呼ぶ。付け忘れると手元（生成物が残っている）では通り、まっさらなチェックアウト＝CI初回だけ落ちる。**`web/` に新しい script を足すときは、生成物を必要とするか確認すること。**
+8. **`web/src/generated/` はGit管理外なので、それを読む npm script には必ず `pre*` フックを付ける**: `predev`・`prebuild`・`pretypecheck` が `sync-data` を呼ぶ。付け忘れると手元（生成物が残っている）では通り、まっさらなチェックアウト＝CI初回だけ落ちる。**`web/` に新しい script を足すときは、生成物を必要とするか確認すること。** `npm run test`（vitest）には `pre*` が**無い**ので、**テストから `src/generated/*` を import してはいけない**（インラインのフィクスチャで書く）。
+9. **年度のような可変軸を地図に載せる指標は、分位ではなく固定境界にする**（M4）: 分位だと年度を切り替えるたびに閾値が動き、同じ値が別の色になって時系列の比較にならない。需要の2024年度比は `DEMAND_RATIO_BIN_EDGES = [0.67, 0.83, 0.95, 1.05, 1.2, 1.5]`（1.0中心・ほぼ乗法対称）に固定し、在宅（実データ0.76〜2.02倍）・外来（0.51〜1.23倍）の全年度を1つのスケールで覆っている。
+10. **`area_map.json` のフラットなプロパティ名は `web/scripts/lib/merge.mjs`（生成側）と `web/src/lib/metrics.ts`（読み側）の2箇所に分かれる**（M4）: どちらもキー生成関数（`demandValueKey`/`demandRatioKey`）を export し、**両者が同じ文字列を返すことを vitest で検証**している。片方だけ変えると型エラーにならず、地図が無色になるだけで静かに壊れる。
+11. **表示用JSONを増やすと metadata の形は揃わない**（M4）: `area_demand_R7.json` は原典が2シートあるため `source_sheet`・`original_title` が**配列**、入力CSVが2本あるため `processing.caveat` が**オブジェクト**（`area_indicators_R7.json` はどちらも文字列）。`types.ts` で `AreaIndicators*` 型を使い回さず別型にすること。**React はオブジェクトをそのまま描画できない**ので、出典表示で必ず踏む。
 
 ## ドキュメント
 
@@ -167,4 +174,11 @@ npm run typecheck  # tsc --noEmit のみ
 - CI に `web/` の typecheck・vitest・build を追加（`test-pipeline.yml`）、GitHub Pages への自動デプロイを追加（`deploy-pages.yml`）
 - 実装で判明した罠は「可視化実装で判明した罠」節に記録
 
-**未実装**: 医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、M4以降のUI（年度スライダー・医療機関ポイント・CSVダウンロード）。
+**M4「医療需要推計 + 年度スライダー」完了**:
+- 需要推計パーサ `tools/parse_demand_forecast.py` → `demand_forecast.csv`（4,068行 = 339区域×2区分×6年度）・`demand_population.csv`（339行）。両シートの区域名・都道府県名を `area_basic.csv` とも相互にも突合して検証する
+- 表示用データセット `tools/build_web_demand.py` → `data/processed/area_demand_R7.json`（検証10項目。**基準年2024の値が全区域×区分で0でないことをビルド時に担保**し、表示側の0除算・null分岐を不要にしている）
+- `web/` に指標セレクタの需要2区分（在宅（訪問診療）・外来）と**年度スライダー**（2024→2050の6段階）を追加。**地図の主表示は2024年度比の変化率**（絶対値はレセプト件数/月で区域の人口規模に支配されるため、地図には出さずツールチップとパネルで見せる）
+- 配色は病床の過不足率と同じ発散7色を再利用し、境界のみ需要用に固定（罠9参照）
+- 出典表示に需要推計のブロックを追加（原典2シート・入力CSV2本ぶんの注記をすべて表示）
+
+**未実装**: 医療機関（001723127）・流入流出（001723366）のパーサ、M5以降のUI（医療機関ポイント・CSVダウンロード）。

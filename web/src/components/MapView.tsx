@@ -1,14 +1,22 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 
-import type { AreaMapFeatureProperties, BedFunctionKey, MetricKind } from '../types';
+import type { AreaMapFeatureProperties, BedFunctionKey, DemandCategoryKey, MetricKind } from '../types';
 import {
+  DEMAND_RATIO_BIN_EDGES,
   RATIO_BIN_COLORS,
   RATIO_BIN_EDGES,
   RATIO_UNAVAILABLE_COLOR,
   RATIO_UNAVAILABLE_OUTLINE_COLOR,
   computeSequentialClasses,
+  demandCategoryOf,
+  demandRatioKey,
+  formatChangeRatio,
   formatMetricValue,
+  formatReceipts,
+  isDemandMetric,
+  readDemandRatio,
+  readDemandValue,
   readMetricValue,
 } from '../lib/metrics';
 
@@ -50,18 +58,41 @@ interface MapViewProps {
   bedFunction: BedFunctionKey;
   metric: MetricKind;
   functionLabel: string;
-  /** computeQuantileEdges() の8値。metric が 'ratio' のときは未使用。 */
+  /** computeQuantileEdges() の8値。metric が 'ratio' または需要指標のときは未使用。 */
   quantileEdges: number[];
   selectedAreaCode: string | null;
   /** 地図クリックで選ばれた区域の area_code（クリックが外れたら null）。 */
   onSelectArea: (areaCode: string | null) => void;
+  /** 需要指標選択中に使う選択年度（西暦）とそのラベル原文。bed指標選択中は未使用。 */
+  demandYear: number;
+  demandYearLabel: string;
+  demandCategoryLabels: Record<DemandCategoryKey, string>;
 }
 
 function buildFillColorExpression(
   metric: MetricKind,
   bedFunction: BedFunctionKey,
-  quantileEdges: number[]
+  quantileEdges: number[],
+  demandYear: number
 ): unknown {
+  if (isDemandMetric(metric)) {
+    // 需要指標は分位ではなく固定境界(DEMAND_RATIO_BIN_EDGES)を使う。年度スライダーで
+    // 年度を切り替えても同じ値(例: 2024年度比+20%)が常に同じ色になるようにするため
+    // ―分位だと年度ごとに区分の閾値が変わってしまい、色の意味が年度間で揺れる。
+    // 値は scripts/lib/merge.mjs buildAreaMap が area_map.json に
+    // <category>_r_<year> = value(year)/value(2024) として事前計算済みで、Pythonの
+    // ビルド時検証(tools/build_web_demand.py 検証7)で基準年が全area×区分で0でない
+    // ことを確認済みのため、'ratio'指標のような「算出不可」の case 分岐は不要
+    // (罠2: step の stop は厳密昇順— DEMAND_RATIO_BIN_EDGES は固定の昇順定数)。
+    const category = demandCategoryOf(metric);
+    const key = demandRatioKey(category, demandYear);
+    const stepExpr: unknown[] = ['step', ['get', key], RATIO_BIN_COLORS[0]];
+    DEMAND_RATIO_BIN_EDGES.forEach((edge, i) => {
+      stepExpr.push(edge, RATIO_BIN_COLORS[i + 1]);
+    });
+    return stepExpr;
+  }
+
   if (metric === 'ratio') {
     const key = `r_${bedFunction}`;
     const stepExpr: unknown[] = ['step', ['get', key], RATIO_BIN_COLORS[0]];
@@ -80,8 +111,40 @@ function buildFillColorExpression(
   return stepExpr;
 }
 
+/** ホバー中のツールチップ本文（1行）。bed指標/需要指標で別の組み立て方をする。 */
+function formatHoverTooltip(
+  props: Record<string, unknown>,
+  metric: MetricKind,
+  bedFunction: BedFunctionKey,
+  functionLabel: string,
+  demandYear: number,
+  demandYearLabel: string,
+  demandCategoryLabels: Record<DemandCategoryKey, string>
+): string {
+  if (isDemandMetric(metric)) {
+    const category = demandCategoryOf(metric);
+    const value = readDemandValue(props, category, demandYear);
+    const ratio = readDemandRatio(props, category, demandYear);
+    const valueText = value === null ? '—' : formatReceipts(value);
+    const ratioText = ratio === null ? '' : `（2024年度比 ${formatChangeRatio(ratio)}）`;
+    return `${demandCategoryLabels[category]} ${demandYearLabel}: ${valueText}${ratioText}`;
+  }
+  return `${functionLabel}: ${formatMetricValue(metric, readMetricValue(props, metric, bedFunction))}`;
+}
+
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { mapDataUrl, bedFunction, metric, functionLabel, quantileEdges, selectedAreaCode, onSelectArea },
+  {
+    mapDataUrl,
+    bedFunction,
+    metric,
+    functionLabel,
+    quantileEdges,
+    selectedAreaCode,
+    onSelectArea,
+    demandYear,
+    demandYearLabel,
+    demandCategoryLabels,
+  },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -275,10 +338,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const map = mapRef.current;
     if (!map || !ready) return;
 
-    map.setPaintProperty(LAYER_FILL, 'fill-color', buildFillColorExpression(metric, bedFunction, quantileEdges));
+    map.setPaintProperty(
+      LAYER_FILL,
+      'fill-color',
+      buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
+    );
     map.setFilter(LAYER_UNAVAILABLE_OUTLINE, ['!', ['has', `r_${bedFunction}`]]);
+    // 「算出不可」の破線レイヤは 'ratio' 選択時のみ意味を持つ（need=0で比が算出不可の
+    // 区域を示す）。実績/必要数の実数指標でも、需要指標（基準年が全区域で0でないこと
+    // をPython側で検証済み — 算出不可の区域はそもそも存在しない）でも非表示にする。
     map.setLayoutProperty(LAYER_UNAVAILABLE_OUTLINE, 'visibility', metric === 'ratio' ? 'visible' : 'none');
-  }, [bedFunction, metric, quantileEdges, ready]);
+  }, [bedFunction, metric, quantileEdges, demandYear, ready]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -327,10 +397,14 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             {hover.props.pref_name} {hover.props.area_name}
           </div>
           <div>
-            {functionLabel}:{' '}
-            {formatMetricValue(
+            {formatHoverTooltip(
+              hover.props as unknown as Record<string, unknown>,
               metric,
-              readMetricValue(hover.props as unknown as Record<string, unknown>, metric, bedFunction)
+              bedFunction,
+              functionLabel,
+              demandYear,
+              demandYearLabel,
+              demandCategoryLabels
             )}
           </div>
         </div>

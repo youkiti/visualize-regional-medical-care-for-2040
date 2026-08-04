@@ -3,7 +3,7 @@
 // the actual/need metrics, and display formatting. No React, no MapLibre —
 // keeps this file trivially unit-testable (see metrics.test.ts).
 
-import type { BedFunctionKey, MetricKind } from '../types';
+import type { BedFunctionKey, BedMetricKind, DemandCategoryKey, DemandMetricKind, MetricKind } from '../types';
 
 /**
  * 2025実績 ÷ 2025必要数。need=0 のときは「0でも∞でもない算出不可」を表すため
@@ -45,15 +45,54 @@ export const RATIO_UNAVAILABLE_OUTLINE_COLOR = '#898781';
 export const RATIO_UNAVAILABLE_LABEL = '算出不可（必要数0）';
 
 /**
+ * Classify a value into one of `edges.length + 1` fixed bins (0-indexed),
+ * given a strictly ascending list of bin edges. Lower bound inclusive, upper
+ * bound exclusive; the last bin is closed (value >= edges[edges.length - 1]
+ * all fall into index edges.length).
+ */
+export function classifyBin(value: number, edges: readonly number[]): number {
+  for (let i = 0; i < edges.length; i++) {
+    if (value < edges[i]) return i;
+  }
+  return edges.length;
+}
+
+/**
  * Classify a ratio value into one of the 7 fixed bins (0-indexed).
  * Lower bound inclusive, upper bound exclusive; the last bin is closed
  * (r >= 1.30 all fall into index 6).
  */
 export function classifyRatioBin(r: number): number {
-  for (let i = 0; i < RATIO_BIN_EDGES.length; i++) {
-    if (r < RATIO_BIN_EDGES[i]) return i;
-  }
-  return RATIO_BIN_EDGES.length; // === RATIO_BIN_COLORS.length - 1
+  return classifyBin(r, RATIO_BIN_EDGES);
+}
+
+// ---- Demand forecast (在宅・外来) change-ratio classification ------------
+//
+// Fixed (not quantile) bin edges around 1.0 = baseline_year (2024), so the
+// color scale keeps the same meaning no matter which forecast year is
+// selected. Verified to cover the observed range for both categories and all
+// forecast years (home_care: 0.76-2.02, outpatient: 0.51-1.23) — see M4
+// brief. Reuses RATIO_BIN_COLORS (below/above 1.0 = blue/red, same direction
+// as the bed actual/need ratio) rather than a new palette.
+export const DEMAND_RATIO_BIN_EDGES = [0.67, 0.83, 0.95, 1.05, 1.2, 1.5] as const;
+
+export const DEMAND_RATIO_BIN_LABELS = [
+  '-33%未満（大きく減少）',
+  '-33% 〜 -17%',
+  '-17% 〜 -5%',
+  '-5% 〜 +5%（ほぼ横ばい）',
+  '+5% 〜 +20%',
+  '+20% 〜 +50%',
+  '+50%以上（大きく増加）',
+] as const;
+
+/**
+ * Classify a demand change ratio (value(year) / value(baseline_year)) into
+ * one of the 7 fixed DEMAND_RATIO_BIN_EDGES bins (0-indexed). Same
+ * inclusive-lower/exclusive-upper convention as classifyRatioBin.
+ */
+export function classifyDemandRatioBin(r: number): number {
+  return classifyBin(r, DEMAND_RATIO_BIN_EDGES);
 }
 
 // Continuous (actual / need) metric ramp — light to dark blue.
@@ -127,6 +166,22 @@ export function formatKm2(km2: number): string {
   return `${km2.toLocaleString('ja-JP', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} km²`;
 }
 
+/**
+ * Format a demand change ratio (value(year) / value(baseline_year)) as a
+ * signed percentage, e.g. 1.304 -> "+30.4%", 0.828 -> "-17.2%". Same
+ * no-sign-for-zero convention as formatDiff.
+ */
+export function formatChangeRatio(ratio: number): string {
+  const pct = (ratio - 1) * 100;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
+}
+
+/** レセプト件数/月 の表示用整形（在宅・外来の医療需要推計）。 */
+export function formatReceipts(value: number): string {
+  return `${formatInteger(value)} 件/月`;
+}
+
 // ---- Sequential (actual/need) classification -----------------------------
 
 /**
@@ -191,12 +246,40 @@ export function computeSequentialClasses(
   return { edges, colors };
 }
 
+// ---- MetricKind classification ---------------------------------------------
+//
+// MetricKind (types.ts) is BedMetricKind | DemandMetricKind. UI code
+// (Controls/App/MapView/Legend) needs to branch on which family a MetricKind
+// belongs to and, for demand metrics, recover the DemandCategoryKey the
+// area_demand_R7.json / area_map.json flat keys below are keyed by.
+
+const DEMAND_METRIC_CATEGORY: Record<DemandMetricKind, DemandCategoryKey> = {
+  demand_home_care: 'home_care',
+  demand_outpatient: 'outpatient',
+};
+
+/** True for the 2 demand-forecast metric kinds ('demand_home_care'/'demand_outpatient'). */
+export function isDemandMetric(metric: MetricKind): metric is DemandMetricKind {
+  return metric === 'demand_home_care' || metric === 'demand_outpatient';
+}
+
+/** The DemandCategoryKey (area_demand_R7.json key) a DemandMetricKind reads from. */
+export function demandCategoryOf(metric: DemandMetricKind): DemandCategoryKey {
+  return DEMAND_METRIC_CATEGORY[metric];
+}
+
 // ---- MapLibre helpers -----------------------------------------------------
 
-/** Read the value for the currently-selected metric off a flat properties record. */
+/**
+ * Read the value for the currently-selected bed metric off a flat
+ * properties record. Bed-only (BedMetricKind, not MetricKind): callers with a
+ * possibly-demand MetricKind must branch via isDemandMetric() first and read
+ * demand values via readDemandValue/readDemandRatio instead — the a_/n_/r_
+ * flat keys this reads have nothing in common with the demand ones.
+ */
 export function readMetricValue(
   props: Record<string, unknown>,
-  metric: MetricKind,
+  metric: BedMetricKind,
   fn: BedFunctionKey
 ): number | null {
   if (metric === 'ratio') {
@@ -208,8 +291,45 @@ export function readMetricValue(
   return typeof v === 'number' ? v : null;
 }
 
-export function formatMetricValue(metric: MetricKind, value: number | null): string {
+/** Bed-only (BedMetricKind, not MetricKind) — see readMetricValue. */
+export function formatMetricValue(metric: BedMetricKind, value: number | null): string {
   if (metric === 'ratio') return formatRatio(value);
   if (value === null) return '—';
   return `${formatInteger(value)} 床`;
+}
+
+// ---- Demand forecast (area_map.json) flat property keys -------------------
+//
+// Mirrors web/scripts/lib/merge.mjs's demandValueKey/demandRatioKey exactly
+// (merge.test.ts checks the two agree) so a key-naming change in one file
+// can't silently drift from the other (see M4 brief).
+
+/** Flat property key for a single (category, year) demand value, e.g. "home_care_2040". */
+export function demandValueKey(category: DemandCategoryKey, year: number): string {
+  return `${category}_${year}`;
+}
+
+/** Flat property key for a single (category, year) demand change ratio, e.g. "home_care_r_2040". */
+export function demandRatioKey(category: DemandCategoryKey, year: number): string {
+  return `${category}_r_${year}`;
+}
+
+/** Read the demand value for (category, year) off a flat properties record. */
+export function readDemandValue(
+  props: Record<string, unknown>,
+  category: DemandCategoryKey,
+  year: number
+): number | null {
+  const v = props[demandValueKey(category, year)];
+  return typeof v === 'number' ? v : null;
+}
+
+/** Read the demand change ratio (value(year) / value(baseline_year)) for (category, year) off a flat properties record. */
+export function readDemandRatio(
+  props: Record<string, unknown>,
+  category: DemandCategoryKey,
+  year: number
+): number | null {
+  const v = props[demandRatioKey(category, year)];
+  return typeof v === 'number' ? v : null;
 }
