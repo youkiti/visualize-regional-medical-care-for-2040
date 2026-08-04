@@ -16,6 +16,8 @@ interface LegendProps {
   quantileEdges: number[];
   /** 需要指標選択中の見出しに使う選択年度ラベル原文（例: "2040年度（現状投影）"）。bed指標選択中は未使用。 */
   demandYearLabel: string;
+  /** 区域選択中（＝地図に医療機関ポイントを表示しうる状態）かどうか。trueのときだけ末尾に凡例を1行足す。 */
+  showFacilityNote: boolean;
 }
 
 const METRIC_TITLES: Record<MetricKind, string> = {
@@ -26,7 +28,7 @@ const METRIC_TITLES: Record<MetricKind, string> = {
   demand_outpatient: '外来需要の2024年度比',
 };
 
-export default function Legend({ metric, functionLabel, quantileEdges, demandYearLabel }: LegendProps) {
+export default function Legend({ metric, functionLabel, quantileEdges, demandYearLabel, showFacilityNote }: LegendProps) {
   // computeQuantileEdges() の生の8値は同値を含みうる(例: 高度急性期の実績
   // 病床数は339区域中69区域が0床)。地図の塗り分けと凡例の区分を必ず一致させる
   // ため、両方とも同じ computeSequentialClasses() から重複を除いた境界と、
@@ -92,6 +94,12 @@ export default function Legend({ metric, functionLabel, quantileEdges, demandYea
             実数（病床数）は区域の人口規模を強く反映するため、区域間の単純な大小比較には注意すること。
           </p>
         </>
+      )}
+      {showFacilityNote && (
+        <p className="legend-note legend-facility-note">
+          点の大きさは施設の病床数（休棟中等含む計）。座標を特定できた施設のみを点として表示しており、
+          特定できなかった施設は医療機関一覧にのみ表示されます。
+        </p>
       )}
     </div>
   );

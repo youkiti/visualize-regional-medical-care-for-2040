@@ -358,6 +358,14 @@ a {
   line-height: 1.4;
 }
 
+/* 区域選択中(＝地図に医療機関ポイントを表示しうる状態)だけ末尾に足す1行。
+   凡例の指標説明とは別の話題なので、区切り線で視覚的に分ける。 */
+.legend-facility-note {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-rule);
+}
+
 .tooltip {
   position: absolute;
   z-index: 7;
@@ -571,4 +579,161 @@ tr.demand-row-baseline {
 .source-notes .known-issues summary {
   cursor: pointer;
   color: var(--color-text-secondary);
+}
+
+/* 医療機関一覧（区域パネル末尾）。bed-table/demand-tableと同じ表組みの流儀に
+   合わせつつ、狭い画面で横に溢れないよう表全体をスクロールコンテナに入れる。 */
+.facility-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 6px;
+}
+
+table.facility-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+table.facility-table th,
+table.facility-table td {
+  text-align: right;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-rule);
+  white-space: nowrap;
+}
+
+table.facility-table th:first-child,
+table.facility-table td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+
+table.facility-table thead th {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.facility-name-toggle {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.facility-name-toggle:hover {
+  text-decoration: underline;
+}
+
+.facility-subline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 2px;
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+}
+
+.facility-function-badge,
+.facility-badge-unmapped {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.facility-function-badge {
+  background: #e1e0d9;
+  color: var(--color-text-secondary);
+}
+
+.facility-badge-unmapped {
+  background: #fdf0d5;
+  border: 1px solid #e3b341;
+  color: var(--color-text-primary);
+}
+
+tr.facility-detail-row td {
+  background: #f2f1ec;
+  text-align: left;
+  white-space: normal;
+}
+
+/* colSpanで束ねたtdは、隣接する数値列がwhite-space: nowrapなせいで広がった
+   テーブル全体の幅に合わせられてしまう（HTMLテーブルは列幅を全行で共有する
+   ため）。そのままだと横スクロールしない限り展開内容の値（dd）が画面外に
+   出てしまう(実機確認で発覚)。position: stickyで内側のラッパーをスクロール
+   コンテナ(.facility-table-wrap)の左端に固定し、tdの実際の幅に関わらず常に
+   サイドパネルの可視幅に収まる形で表示する。 */
+.facility-detail {
+  position: sticky;
+  left: 0;
+  width: min(300px, calc(100vw - 96px));
+}
+
+.facility-detail-id {
+  margin: 0 0 8px 0;
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+.facility-detail-group {
+  margin-bottom: 8px;
+}
+
+.facility-detail-group h4 {
+  margin: 0 0 3px 0;
+  font-size: 0.74rem;
+  color: var(--color-text-secondary);
+}
+
+.facility-detail-group dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin: 0;
+  font-size: 0.74rem;
+}
+
+.facility-detail-group dt {
+  color: var(--color-text-secondary);
+}
+
+.facility-detail-group dd {
+  margin: 0;
+  text-align: right;
+}
+
+.facility-list-error {
+  font-size: 0.8rem;
+  color: #a32c2b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.facility-list-error button {
+  font-size: 0.78rem;
+  padding: 3px 8px;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: var(--color-panel-bg);
+  cursor: pointer;
+}
+
+.facility-legend-note {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  margin: 4px 0 0 0;
 }

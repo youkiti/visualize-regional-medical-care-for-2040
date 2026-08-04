@@ -1,5 +1,6 @@
 import { Fragment } from 'react';
 
+import FacilityList from './FacilityList';
 import {
   computeRatio,
   formatChangeRatio,
@@ -10,7 +11,16 @@ import {
   formatRatio,
   formatReceipts,
 } from '../lib/metrics';
-import type { AreaDemandArea, AreaIndicator, BedFunctionKey, DemandCategoryKey } from '../types';
+import type { FacilityShardStatus } from '../lib/facilityShard';
+import type {
+  AreaDemandArea,
+  AreaIndicator,
+  BedFunctionKey,
+  DemandCategoryKey,
+  Facility,
+  FacilityMetric,
+  FacilityValueStatus,
+} from '../types';
 
 interface AreaPanelProps {
   area: AreaIndicator;
@@ -25,6 +35,15 @@ interface AreaPanelProps {
   demandYears: number[];
   demandYearLabels: Record<string, string>;
   demandBaselineYear: number;
+  /** facility_summary.json（バンドル済み）由来。shard未取得でも件数だけは出せる。 */
+  facilityCount: number;
+  facilityStatus: FacilityShardStatus;
+  /** useFacilityShard(App.tsx)の取得結果。取得前/失敗時はnull。 */
+  facilities: Facility[] | null;
+  facilityError: string | null;
+  onRetryFacilities: () => void;
+  facilityMetrics: FacilityMetric[];
+  facilityValueStatusLabels: Record<FacilityValueStatus, string>;
 }
 
 export default function AreaPanel({
@@ -38,6 +57,13 @@ export default function AreaPanel({
   demandYears,
   demandYearLabels,
   demandBaselineYear,
+  facilityCount,
+  facilityStatus,
+  facilities,
+  facilityError,
+  onRetryFacilities,
+  facilityMetrics,
+  facilityValueStatusLabels,
 }: AreaPanelProps) {
   const isSyntheticBoundary = boundarySource != null && boundarySource.includes('三重県');
 
@@ -160,6 +186,20 @@ export default function AreaPanel({
       ) : (
         <p className="area-panel-placeholder">この区域の医療需要推計データが見つかりません。</p>
       )}
+
+      {/* keyにarea_codeを指定して区域切替のたびに再マウントさせることで、
+          FacilityList内部の行展開状態(useState)を自動でリセットする
+          (brief「区域を切り替えたら展開状態をリセットする」)。 */}
+      <FacilityList
+        key={area.area_code}
+        facilityCount={facilityCount}
+        status={facilityStatus}
+        facilities={facilities}
+        error={facilityError}
+        onRetry={onRetryFacilities}
+        metrics={facilityMetrics}
+        valueStatusLabels={facilityValueStatusLabels}
+      />
 
       {boundarySource && (
         <p className={`boundary-note ${isSyntheticBoundary ? 'boundary-note-synthetic' : ''}`}>
