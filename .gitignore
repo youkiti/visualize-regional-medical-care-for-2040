@@ -13,6 +13,7 @@ venv/
 # Node (可視化サイト導入後)
 node_modules/
 dist/
+web/src/generated/
 
 # Claude Code (個人設定はコミットしない)
 .claude/settings.local.json

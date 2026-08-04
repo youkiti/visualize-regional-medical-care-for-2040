@@ -2,7 +2,9 @@
 
 厚生労働省「[2040年に向けた地域医療構想](https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html)」の公開データ（病床機能報告・医療需要推計）を、**データの真正性（出典・非改変）を担保した形で**可視化するプロジェクト。
 
-地域の医療の現状を誰でも把握できるよう、地図中心の閲覧サイトを GitHub Pages で公開し、加工済みデータの CSV ダウンロードも提供する（現在は要件定義完了・実装前）。
+地域の医療の現状を誰でも把握できるよう、地図中心の閲覧サイトを GitHub Pages で公開し、加工済みデータの CSV ダウンロードも提供する。
+
+**公開サイト**: https://youkiti.github.io/visualize-regional-medical-care-for-2040/
 
 ## 提供予定の機能
 
@@ -22,10 +24,25 @@
 | `R7/` | 令和7年度公表の生データ（**編集禁止**、ファイル名は厚労省のファイルID） |
 | `R6/` | 令和6年度公表の生データ（**編集禁止**、別添資料名） |
 | `ksj/` | 国土数値情報（国土交通省）のジオデータ（**編集禁止**）。二次医療圏境界（A38）・医療機関位置（P04）。A38 はサイズ超過のため Git 管理外（下記参照） |
-| `tools/` | データ取得・加工スクリプト（`fetch_ksj_geodata.py`・`build_iryoken2_geojson.py`・`parse_prefecture_beds.py`）と共通基盤（`tools/lib/`）・テスト（`tools/tests/`） |
+| `tools/` | データ取得・加工スクリプト（`fetch_ksj_geodata.py`・`parse_prefecture_beds.py`・`parse_area_beds.py`・`build_area_boundaries.py`・`verify_area_join.py`・`build_web_data.py` ほか）と共通基盤（`tools/lib/`）・テスト（`tools/tests/`） |
 | `SHA256SUMS` | 生データの SHA-256 ハッシュ（完全性検証用） |
 | `doc/` | ドキュメント（[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)） |
-| `data/processed/` | 加工済みデータ（二次医療圏境界 GeoJSON、都道府県別病床数等の CSV。ファイル内 or 同名 `.meta.json` に由来メタデータ同梱） |
+| `data/processed/` | 加工済みデータ（構想区域境界 GeoJSON、都道府県別・構想区域別病床数等の CSV/JSON。ファイル内 or 同名 `.meta.json` に由来メタデータ同梱） |
+| `web/` | 可視化サイト本体（Vite + React + MapLibre GL）。`data/processed/` を正本として `npm run dev`/`build` 時に表示用データを自動生成する |
+
+## 可視化サイトをローカルで動かす
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+`http://localhost:5173` で開く。`predev`/`prebuild` が `data/processed/` から `web/src/generated/`（Git管理外）を自動生成するため、`data/processed/` を再生成した後もコマンド一発で反映される。
+
+## GitHub Pages への公開
+
+`main` への push で [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) が自動でビルド・デプロイする。**初回のみ、リポジトリの Settings → Pages で「Source」を "GitHub Actions" に切り替える必要がある**（ワークフローを置くだけでは有効化されない、リポジトリ管理者の手動操作）。
 
 ## データの真正性
 
@@ -64,7 +81,9 @@
 - [x] 二次医療圏境界の軽量 GeoJSON 生成（`data/processed/iryoken2_A38-20.geojson`、由来メタデータ同梱）
 - [x] Excel パーサ基盤（`tools/lib/`：完全性検証・コード正規化・由来メタデータ付きCSV出力）とテスト（`pytest`）・CI（`.github/workflows/test-pipeline.yml`）
 - [x] Excel パーサ: 都道府県別の病床数等（`tools/parse_prefecture_beds.py` → `data/processed/prefecture_*.csv`）
-- [ ] Excel パーサ: 構想区域別・医療機関別・需要推計・流入流出（未実装）
-- [ ] 地理データ突合（二次医療圏境界・医療機関位置）
-- [ ] 可視化サイト実装（Vite + React + MapLibre GL）
-- [ ] GitHub Actions によるビルド・Pages デプロイ
+- [x] Excel パーサ: 構想区域別の病床数等（`tools/parse_area_beds.py` → `data/processed/area_*.csv`）
+- [x] 地理データ突合（構想区域 × 二次医療圏境界、[doc/JOIN_VERIFICATION.md](doc/JOIN_VERIFICATION.md)）と可視化用境界 GeoJSON 生成（`data/processed/area_boundaries_R7.geojson`）
+- [x] 可視化サイト実装（Vite + React + MapLibre GL、339構想区域のコロプレス表示、`web/`）
+- [x] GitHub Actions によるビルド・Pages デプロイ（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)）
+- [ ] Excel パーサ: 医療機関別・需要推計・流入流出（未実装）
+- [ ] CSV ダウンロード機能（未実装）
