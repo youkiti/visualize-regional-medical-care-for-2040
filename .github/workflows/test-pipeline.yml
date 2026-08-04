@@ -15,3 +15,25 @@ jobs:
         run: pip install -r requirements.txt
       - name: pytest
         run: pytest -q
+
+  web:
+    name: 可視化サイトのテスト・ビルド
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: 依存関係のインストール
+        run: npm ci
+      - name: 型チェック
+        run: npm run typecheck
+      - name: vitest
+        run: npm run test
+      - name: ビルド
+        run: npm run build

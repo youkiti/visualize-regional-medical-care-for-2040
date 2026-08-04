@@ -13,6 +13,7 @@
     "prebuild": "npm run sync-data",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretypecheck": "npm run sync-data",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

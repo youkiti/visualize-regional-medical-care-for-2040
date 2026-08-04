@@ -53,6 +53,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 9ページ「現行の二次医療圏・構想区域」が、三重県の4二次医療圏と8構想区域の対応・構成市町（29市町）を示す一次資料。三重県はこの両方を**併存**させており、構想区域は二次医療圏の細分（入れ子構造）。機械可読化した対応表は `data/reference/mie_area_municipalities.csv`（`tools/build_mie_area_municipalities.py` が生成し、A38の構成市区町村・医療機関所在地との5系統の突合で転記を検証する）。
 
+### web/ — 可視化サイト
+
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）へ表示用データを合成する:
+
+| 生成物 | 用途 |
+|---|---|
+| `area_indicators.json` | 正本の忠実コピー（改行のみLF正規化）。**バンドルに取り込み**、パネル・検索・分位計算・出典表示に使う |
+| `area_map.json` | 境界GeoJSON + フラット化した指標プロパティ（約4.7MB）。**`?url` インポートでファイルURLのみをバンドルに含め、MapLibreにfetchさせる**（4.7MBをメインスレッドでパースしない） |
+| `area_index.json` | 選択・bbox解決用の軽量インデックス（`area_code`・`boundary_source`・bboxのみ）。**バンドルに取り込み**、地図の表示状態に依存せず区域選択を解決する |
+
+正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
+
 ### パース時の注意（帳票形式のExcel）
 
 - 需要推計（001728462）以外は**帳票レイアウト**（結合セル・複数行ヘッダー・区域ごとの繰り返しブロック）。`pandas.read_excel` の素朴な読み込みでは崩れるため、位置ベースで抽出する。
@@ -94,13 +106,42 @@ PYTHONIOENCODING=utf-8 python tools/verify_area_join.py
 PYTHONIOENCODING=utf-8 python tools/build_iryoken2_geojson.py    # → iryoken2_A38-20.geojson（335二次医療圏）
 PYTHONIOENCODING=utf-8 python tools/build_area_boundaries.py     # → area_boundaries_R7.geojson（339構想区域・可視化用）
 
+# 可視化サイト向け表示用データセット（→ area_indicators_R7.json）
+PYTHONIOENCODING=utf-8 python tools/build_web_data.py
+
 # テスト
 pytest
 ```
 
 `doc/JOIN_VERIFICATION.md` は `tools/verify_area_join.py` の**生成物**。手で編集しないこと。
 
-CI は push・pull_request ごとに `test-pipeline.yml`（pytest）と `verify-data.yml`（生データのSHA-256検証）を実行する。`ksj/A38-20` はGit管理外のためCIには存在しない。**この zip に依存するスクリプト・テストを書くときは、CIで落ちないよう `skipif` でスキップ可能にすること。**
+CI は push・pull_request ごとに `test-pipeline.yml`（pytest・`web/` の typecheck/test/build）と `verify-data.yml`（生データのSHA-256検証）を実行する。`ksj/A38-20` はGit管理外のためCIには存在しない。**この zip に依存するスクリプト・テストを書くときは、CIで落ちないよう `skipif` でスキップ可能にすること。**
+
+`main` への push では `deploy-pages.yml` が `web/` をビルドして GitHub Pages へ自動デプロイする（要: リポジトリ Settings → Pages の Source を "GitHub Actions" に切り替え。詳細は README「GitHub Pages への公開」）。
+
+可視化サイト（`web/`）はリポジトリルートではなく `web/` 内で実行する:
+
+```bash
+cd web
+npm ci             # 依存関係のインストール
+npm run dev        # 開発サーバ（predev が sync-data を自動実行）
+npm run build      # 型チェック(tsc --noEmit) + Vite ビルド（prebuild が sync-data を自動実行）
+npm run test       # vitest
+npm run typecheck  # tsc --noEmit のみ
+```
+
+## 可視化実装で判明した罠
+
+`web/` の実装（M3）で踏んだもので、次に同じUIを触る人が必ず再発させる類のもの。
+
+1. **MapLibre の `querySourceFeatures` は表示範囲外のタイルを見ない**: 区域検索など「今表示されていない区域」を選ぶ用途には使えない。選択と bbox は別途バンドルしたインデックス（`area_index.json`）から解決する。
+2. **`step` 式の stop は厳密昇順でなければならない**: 分位境界は実データで重複する（高度急性期の実績は339区域中69区域が0床なので下位2境界が同値）。重複を潰して区分数を減らし、地図と凡例を同じ境界から生成すること。
+3. **スタイルに `glyphs` を置かない（＝外部フォント配信に依存しない）と `symbol`（テキスト）レイヤが使えない**: 区域名はツールチップ・パネル・検索で見せる。
+4. **陸と海は塗りの色では分けられない**: 発散配色の中立 `#e1e0d9` も連続配色の淡端 `#cde2fb` も海 `#dde5ec` に対して 1.04:1 しかなく、海の明度をどう選んでもランプのどこかと必ず衝突する。塗りの下に太い線を敷き、内陸は隣接区域の塗りで覆わせて外周だけを縁として残す（ケーシング）。
+5. **React 18 StrictMode では map が「生成→破棄→生成」される**: 破棄済みインスタンスのイベントを弾かないと開発時に正常な地図の上へ誤ったエラー表示が出る。クリーンアップで ref を先に null にしてから `map.remove()` し、ハンドラ側で現行インスタンスか確認する。
+6. **maplibre-gl の型定義は `error` イベントを DOM の `ErrorEvent` に解決するため `e.sourceId` が型に無い**（実行時には存在する）。`tsconfig` は `allowJs: true` が必要（vitest から `scripts/lib/*.mjs` を import するため）。
+7. **MapLibre のフィーチャプロパティはフラットなスカラーのみにする**: クリックイベントで受け取る properties はネストしたオブジェクトが文字列化される。
+8. **`web/src/generated/` はGit管理外なので、それを読む npm script には必ず `pre*` フックを付ける**: `predev`・`prebuild`・`pretypecheck` が `sync-data` を呼ぶ。付け忘れると手元（生成物が残っている）では通り、まっさらなチェックアウト＝CI初回だけ落ちる。**`web/` に新しい script を足すときは、生成物を必要とするか確認すること。**
 
 ## ドキュメント
 
@@ -119,4 +160,11 @@ CI は push・pull_request ごとに `test-pipeline.yml`（pytest）と `verify-
 - 三重県の市町対応表を公式一次資料（`mie/001092203.pdf`）から確定し、5系統の突合で転記を検証（`tools/build_mie_area_municipalities.py`）
 - 可視化用の339構想区域境界 `data/processed/area_boundaries_R7.geojson`（`tools/build_area_boundaries.py`）
 
-**未実装**: 医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、可視化サイト本体（Vite + React + MapLibre → GitHub Pages）。技術スタック導入時は、実行・ビルド・テストのコマンドをこのファイルに追記すること。
+**M3「最小の公開サイト」完了**:
+- 可視化サイト本体を `web/`（Vite + React + MapLibre GL）に実装。339構想区域のコロプレス地図・区域パネル・区域検索・凡例・出典表示
+- 指標は「2025年実績 vs 2025年必要数」に限定（`tools/build_web_data.py` → `data/processed/area_indicators_R7.json`。年度が揃い、かつ2024実績の既知欠陥を踏まない唯一の組み合わせ）
+- `web/scripts/sync-data.mjs` が `data/processed/` を正本として `web/src/generated/` を生成（詳細は「データ構成」節の `web/` 参照）
+- CI に `web/` の typecheck・vitest・build を追加（`test-pipeline.yml`）、GitHub Pages への自動デプロイを追加（`deploy-pages.yml`）
+- 実装で判明した罠は「可視化実装で判明した罠」節に記録
+
+**未実装**: 医療機関（001723127）・需要推計（001728462）・流入流出（001723366）のパーサ、M4以降のUI（年度スライダー・医療機関ポイント・CSVダウンロード）。
