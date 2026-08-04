@@ -220,7 +220,7 @@ def test_metadata_source_has_sha256_and_no_generation_timestamp(data):
 
 def test_metadata_required_top_level_keys(data):
     meta = data["metadata"]
-    for key in ("title", "source", "processing", "fields"):
+    for key in ("title", "source", "processing", "fields", "known_issues"):
         assert key in meta, key
 
 
@@ -229,3 +229,39 @@ def test_metadata_caveat_has_both_inputs(data):
     assert set(caveat.keys()) == {"demand_forecast", "demand_population"}
     assert "レセプト" in caveat["demand_forecast"]
     assert "人口" in caveat["demand_population"]
+
+
+def test_metadata_known_issues_is_a_list_with_the_required_shape(data):
+    """known_issuesは常に存在するリストで、表示側(SourceNotes)が使う
+    id/summary/actionを全件が持つこと。原典側の欠陥を今後ここへ足していく
+    ための土台なので、キーの有無ではなく形を固定する。"""
+    issues = data["metadata"]["known_issues"]
+    assert isinstance(issues, list)
+    for issue in issues:
+        for key in ("id", "summary", "action"):
+            assert isinstance(issue.get(key), str) and issue[key], (issue.get("id"), key)
+    ids = [issue["id"] for issue in issues]
+    assert len(ids) == len(set(ids)), f"known_issuesのidが重複している: {ids}"
+
+
+def test_metadata_known_issues_records_the_population_base_year_conflict(data):
+    """基準人口の年が原典Excel(2024年度)と公式説明書(2025年)で食い違う件が、
+    caveatの散文ではなく機械可読なknown_issuesとして載っていること。"""
+    issues = {issue["id"]: issue for issue in data["metadata"]["known_issues"]}
+    issue = issues["demand_population_base_year_conflict"]
+    assert "2025" in " ".join(issue["evidence"])
+    assert "001728467" in " ".join(issue["evidence"])
+    # 値は原典どおりで、説明書側へ読み替えていないこと
+    assert "population_2024" in issue["action"]
+
+
+def test_known_issues_are_carried_over_from_the_input_csv_metadata(data):
+    """known_issuesはbuild_web_demand.pyがその場で書くのではなく、入力CSVの
+    meta.jsonから集約されること(パーサのKNOWN_ISSUESへ1件足すだけで
+    表示用データセットまで流れる導線を固定する)。"""
+    carried = []
+    for csv_path in (DEMAND_FORECAST_CSV, DEMAND_POPULATION_CSV):
+        meta_path = csv_path.with_name(csv_path.name + ".meta.json")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        carried.extend(meta.get("known_issues", []))
+    assert data["metadata"]["known_issues"] == carried

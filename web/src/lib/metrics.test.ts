@@ -340,7 +340,18 @@ describe('formatting', () => {
 
   it('formatChangeRatio rounds to one decimal place', () => {
     expect(formatChangeRatio(1.2465)).toBe('+24.6%'); // (ratio-1)*100 = 24.65 -> banker-free round via toFixed
-    expect(formatChangeRatio(0.9999)).toBe('-0.0%'); // -0.01 rounds to -0.0, matches toFixed(1) behavior
+  });
+
+  it('formatChangeRatio normalizes changes that round to zero, in both directions', () => {
+    // A minus sign next to a rounded zero reads as a decrease the digits do not
+    // show. Both real occurrences in area_demand_R7.json are covered here.
+    expect(formatChangeRatio(0.9999)).toBe('0.0%'); // -0.01% -> rounds away
+    expect(formatChangeRatio(0.9996251416768416)).toBe('0.0%'); // 峡南・在宅2050年度
+    expect(formatChangeRatio(0.9999236248381369)).toBe('0.0%'); // 宮崎東諸県・外来2035年度
+    expect(formatChangeRatio(1.0001)).toBe('0.0%'); // +0.01% -> same treatment
+    // Just outside the rounding boundary the sign must still be shown.
+    expect(formatChangeRatio(0.9994)).toBe('-0.1%');
+    expect(formatChangeRatio(1.0006)).toBe('+0.1%');
   });
 
   it('formatReceipts adds thousands separators and the 件/月 unit', () => {

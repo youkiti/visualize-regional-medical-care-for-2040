@@ -1,8 +1,35 @@
-import type { AreaDemandMetadata, AreaIndicatorsMetadata } from '../types';
+import type { AreaDemandMetadata, AreaIndicatorsMetadata, KnownIssue } from '../types';
 
 interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
+}
+
+/**
+ * 原典側の既知の欠陥の一覧。病床・需要の両データセットが同じ形の
+ * known_issues を持つため、片方だけ表示の仕方がずれないよう共通化している。
+ * 新しい欠陥はパーサの KNOWN_ISSUES へ足すだけでここに出る。
+ *
+ * summary/action のみ描画する。scope はオブジェクト・evidence は配列で、
+ * React はオブジェクトをそのまま描画できない(CLAUDE.md「可視化実装で判明した罠」11)。
+ */
+function KnownIssues({ issues, label }: { issues: KnownIssue[]; label: string }) {
+  if (issues.length === 0) return null;
+  return (
+    <details className="known-issues">
+      <summary>
+        {label}（{issues.length}件）
+      </summary>
+      <ul>
+        {issues.map((issue) => (
+          <li key={issue.id}>
+            {issue.summary}
+            {typeof issue.action === 'string' && issue.action ? `／対応: ${issue.action}` : null}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
 }
 
 export default function SourceNotes({ metadata, demandMetadata }: SourceNotesProps) {
@@ -62,19 +89,7 @@ export default function SourceNotes({ metadata, demandMetadata }: SourceNotesPro
         表示範囲内のため選択可能）。
       </p>
 
-      {knownIssues.length > 0 && (
-        <details className="known-issues">
-          <summary>データの既知の問題（{knownIssues.length}件）</summary>
-          <ul>
-            {knownIssues.map((issue) => (
-              <li key={issue.id}>
-                {issue.summary}
-                {typeof issue.action === 'string' && issue.action ? `／対応: ${issue.action}` : null}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <KnownIssues issues={knownIssues} label="データの既知の問題（病床）" />
 
       <h3>出典・注記（医療需要推計）</h3>
 
@@ -111,6 +126,8 @@ export default function SourceNotes({ metadata, demandMetadata }: SourceNotesPro
         <dt>利用規約</dt>
         <dd>{demandSource.license}</dd>
       </dl>
+
+      <KnownIssues issues={demandMetadata.known_issues} label="データの既知の問題（医療需要推計）" />
     </section>
   );
 }

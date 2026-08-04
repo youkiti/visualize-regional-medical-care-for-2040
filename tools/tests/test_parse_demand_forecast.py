@@ -15,6 +15,7 @@ from tools.parse_demand_forecast import (
     DATA_END_ROW,
     DATA_START_ROW,
     EXPECTED_YEARS,
+    KNOWN_ISSUES,
     LayoutMismatchError,
     NUM_AREAS,
     SHEET_HOME_CARE,
@@ -22,6 +23,7 @@ from tools.parse_demand_forecast import (
     _extract_year,
     _validate_against_area_basic,
     build_and_write,
+    known_issues_for,
     load_workbook,
     parse_sheet,
 )
@@ -229,12 +231,53 @@ def test_outpatient_area_name_drift_is_detected(home_care_result):
     assert verify_source("R7/001728462.xlsx") == recorded_hash("R7/001728462.xlsx")
 
 
-# --- 再現性(バイト一致) -----------------------------------------------------
+# --- 原典側の既知の欠陥(known_issues) ---------------------------------------
 
+# パーサが出力する2本のCSV。known_issuesのscope.csvの妥当性検査と、
+# 下の再現性テストの両方で使う。
 CSV_NAMES = [
     "demand_forecast.csv",
     "demand_population.csv",
 ]
+
+
+def test_known_issues_have_the_required_shape():
+    """KNOWN_ISSUESの各件がid/scope/summary/evidence/actionを持ち、scope.csvが
+    実在の出力CSVを指すこと。今後ここへ足していくための形の固定。"""
+    assert KNOWN_ISSUES, "KNOWN_ISSUESが空(この帳票には少なくとも基準人口の不一致がある)"
+    ids = [issue["id"] for issue in KNOWN_ISSUES]
+    assert len(ids) == len(set(ids)), f"idが重複している: {ids}"
+    for issue in KNOWN_ISSUES:
+        assert issue["scope"]["csv"] in CSV_NAMES, issue["id"]
+        for key in ("id", "summary", "action"):
+            assert isinstance(issue[key], str) and issue[key], (issue["id"], key)
+        assert isinstance(issue["evidence"], list) and issue["evidence"], issue["id"]
+
+
+def test_known_issues_for_routes_by_scope_csv():
+    """known_issues_for()がscope.csvで振り分け、該当なしではNoneを返すこと
+    (Noneのときmeta.jsonにknown_issuesキー自体を出さないため、空リストと
+    区別されることが重要)。"""
+    assert known_issues_for("存在しない.csv") is None
+    routed = {name: known_issues_for(name) or [] for name in CSV_NAMES}
+    assert sum(len(v) for v in routed.values()) == len(KNOWN_ISSUES)
+    for name, issues in routed.items():
+        for issue in issues:
+            assert issue["scope"]["csv"] == name
+
+
+def test_population_base_year_conflict_is_recorded():
+    """基準人口の年が原典Excel(2024年度)と公式説明書(2025年)で食い違う件が
+    記録されており、値を読み替えていないと明記されていること。"""
+    issue = next(i for i in KNOWN_ISSUES if i["id"] == "demand_population_base_year_conflict")
+    assert issue["scope"]["csv"] == "demand_population.csv"
+    assert "population_2024" in issue["scope"]["columns"]
+    evidence = " ".join(issue["evidence"])
+    assert "001728462" in evidence and "001728467" in evidence
+    assert "2024年度" in evidence and "2025" in evidence
+
+
+# --- 再現性(バイト一致) -----------------------------------------------------
 
 
 def test_reproducibility_byte_identical(tmp_path):

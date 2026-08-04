@@ -505,6 +505,18 @@ tr.demand-row-baseline {
   color: var(--color-text-secondary);
 }
 
+/* 基準人口の年が原典間で食い違っている旨の注記。値そのものは正しいので警告色
+   (#fdf0d5/#e3b341)ではなく、.boundary-note と同じ中立の注記色にする。 */
+.population-basis-note {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  background: #f2f1ec;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 0 0 10px 0;
+  line-height: 1.5;
+}
+
 .boundary-note {
   font-size: 0.76rem;
   color: var(--color-text-secondary);
