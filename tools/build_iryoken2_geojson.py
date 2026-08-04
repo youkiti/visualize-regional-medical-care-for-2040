@@ -21,17 +21,20 @@
 """
 import argparse
 import datetime
-import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.lib.provenance import REPO_ROOT, recorded_hash, sha256
+
 SRC_ZIP = REPO_ROOT / "ksj" / "A38-20" / "A38-20_GML.zip"
-SHA256SUMS = REPO_ROOT / "SHA256SUMS"
 OUT_PATH = REPO_ROOT / "data" / "processed" / "iryoken2_A38-20.geojson"
 
 SOURCE_PAGE = "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-A38-v2_0.html"
@@ -51,21 +54,6 @@ FIELD_DESCRIPTIONS = {
     "A38b_010": "人口15才以上65才未満・住民基本台帳（人）",
     "A38b_011": "人口65才以上・住民基本台帳（人）",
 }
-
-
-def sha256(p: Path) -> str:
-    h = hashlib.sha256()
-    with open(p, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def recorded_hash(path_in_repo: str) -> str:
-    for line in SHA256SUMS.read_text(encoding="utf-8").splitlines():
-        if line.strip().endswith(path_in_repo):
-            return line.split()[0]
-    raise SystemExit(f"SHA256SUMS に {path_in_repo} の記録がありません")
 
 
 def main() -> None:

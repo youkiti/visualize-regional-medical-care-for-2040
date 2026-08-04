@@ -22,10 +22,10 @@
 | `R7/` | 令和7年度公表の生データ（**編集禁止**、ファイル名は厚労省のファイルID） |
 | `R6/` | 令和6年度公表の生データ（**編集禁止**、別添資料名） |
 | `ksj/` | 国土数値情報（国土交通省）のジオデータ（**編集禁止**）。二次医療圏境界（A38）・医療機関位置（P04）。A38 はサイズ超過のため Git 管理外（下記参照） |
-| `tools/` | データ取得・加工スクリプト（`fetch_ksj_geodata.py`・`build_iryoken2_geojson.py`） |
+| `tools/` | データ取得・加工スクリプト（`fetch_ksj_geodata.py`・`build_iryoken2_geojson.py`・`parse_prefecture_beds.py`）と共通基盤（`tools/lib/`）・テスト（`tools/tests/`） |
 | `SHA256SUMS` | 生データの SHA-256 ハッシュ（完全性検証用） |
 | `doc/` | ドキュメント（[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)） |
-| `data/processed/` | 加工済みデータ（二次医療圏境界 GeoJSON など。ファイル内に由来メタデータ同梱） |
+| `data/processed/` | 加工済みデータ（二次医療圏境界 GeoJSON、都道府県別病床数等の CSV。ファイル内 or 同名 `.meta.json` に由来メタデータ同梱） |
 
 ## データの真正性
 
@@ -62,7 +62,9 @@
 - [x] GitHub Actions による生データの完全性検証（`sha256sum -c`）
 - [x] 地理データ収集（国土数値情報 二次医療圏境界 A38・医療機関 P04、`ksj/`）
 - [x] 二次医療圏境界の軽量 GeoJSON 生成（`data/processed/iryoken2_A38-20.geojson`、由来メタデータ同梱）
-- [ ] Excel パーサ実装（帳票レイアウト → tidy データ）
+- [x] Excel パーサ基盤（`tools/lib/`：完全性検証・コード正規化・由来メタデータ付きCSV出力）とテスト（`pytest`）・CI（`.github/workflows/test-pipeline.yml`）
+- [x] Excel パーサ: 都道府県別の病床数等（`tools/parse_prefecture_beds.py` → `data/processed/prefecture_*.csv`）
+- [ ] Excel パーサ: 構想区域別・医療機関別・需要推計・流入流出（未実装）
 - [ ] 地理データ突合（二次医療圏境界・医療機関位置）
 - [ ] 可視化サイト実装（Vite + React + MapLibre GL）
 - [ ] GitHub Actions によるビルド・Pages デプロイ
