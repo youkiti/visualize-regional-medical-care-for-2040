@@ -1,4 +1,4 @@
-// data/processed/ の加工済みCSV13本を1本のZIPにまとめて配布するための、
+// data/processed/ の加工済みCSV14本を1本のZIPにまとめて配布するための、
 // ZIP本文（MANIFEST.tsv・README.md）を組み立てる純関数群。I/Oはしない
 // （実際にファイルを読み書き・ZIP化するのは web/scripts/sync-data.mjs）。
 //
@@ -11,7 +11,7 @@ export const BUNDLE_ROOT = 'chiiki-iryo-koso_processed-csv_R6_R7';
 /** web/public/downloads/ に書き出すZIPファイル名。 */
 export const BUNDLE_FILE_NAME = 'chiiki-iryo-koso_processed-csv_R6_R7.zip';
 
-// data/processed/ にある加工済みCSV13本を明示的に列挙する（ディレクトリを走査
+// data/processed/ にある加工済みCSV14本を明示的に列挙する（ディレクトリを走査
 // して拾うのではなく、この配列を正とする）。sync-data.mjs はこの配列と実際の
 // data/processed/*.csv の一覧を突合し、食い違ったらビルドを落とす
 // （新しいCSVが増えたときに黙って配布物から漏れる／意図しないファイルが
@@ -21,6 +21,7 @@ export const BUNDLE_CSV_FILES = [
   'area_bed_report_rate.csv',
   'area_beds.csv',
   'area_geo_join.csv',
+  'area_yoy_diff.csv',
   'demand_forecast.csv',
   'demand_population.csv',
   'facility_basic.csv',
@@ -297,12 +298,12 @@ export function buildBundleReadme(input) {
   lines.push('');
   lines.push(
     '国土数値情報「医療圏データ」`ksj/A38-20/A38-20_GML.zip`（約1.13GB）は容量の都合で' +
-      'リポジトリに含まれていません（Git管理外）。このZIP内の13本のCSVのうち' +
-      '**`area_geo_join.csv` を除く12本**はこのファイルなしで再現できます。'
+      'リポジトリに含まれていません（Git管理外）。このZIP内の14本のCSVのうち' +
+      '**`area_geo_join.csv` を除く13本**はこのファイルなしで再現できます。'
   );
   lines.push('');
 
-  lines.push('### 1. `area_geo_join.csv` を除く12本');
+  lines.push('### 1. `area_geo_join.csv` を除く13本');
   lines.push('');
   lines.push('```bash');
   lines.push(`git clone ${repoUrl}.git`);
@@ -310,6 +311,7 @@ export function buildBundleReadme(input) {
   lines.push('pip install -r requirements.txt');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_area_beds.py');
+  lines.push('PYTHONIOENCODING=utf-8 python tools/verify_yoy_R6_R7.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_demand_forecast.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_facility_beds.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/build_mie_area_municipalities.py');

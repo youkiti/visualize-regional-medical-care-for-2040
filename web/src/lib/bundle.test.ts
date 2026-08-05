@@ -13,10 +13,11 @@ import {
 // for why: no pre* hook runs before `npm run test`).
 
 describe('BUNDLE_CSV_FILES', () => {
-  it('lists exactly the 13 processed CSVs, with no duplicates', () => {
-    expect(BUNDLE_CSV_FILES).toHaveLength(13);
-    expect(new Set(BUNDLE_CSV_FILES).size).toBe(13);
+  it('lists exactly the 14 processed CSVs, with no duplicates', () => {
+    expect(BUNDLE_CSV_FILES).toHaveLength(14);
+    expect(new Set(BUNDLE_CSV_FILES).size).toBe(14);
     expect(BUNDLE_CSV_FILES).toContain('area_beds.csv');
+    expect(BUNDLE_CSV_FILES).toContain('area_yoy_diff.csv');
     expect(BUNDLE_CSV_FILES).toContain('facility_observations.csv');
     expect(BUNDLE_CSV_FILES).toContain('prefecture_beds.csv');
   });
@@ -469,9 +470,9 @@ describe('buildBundleReadme', () => {
     expect(verifyIdx).toBeGreaterThan(buildIdx);
   });
 
-  it('re-generation instructions state that 12 of the 13 CSVs (all but area_geo_join.csv) do not require ksj/A38-20', () => {
+  it('re-generation instructions state that 13 of the 14 CSVs (all but area_geo_join.csv) do not require ksj/A38-20', () => {
     const readme = buildBundleReadme({ repoUrl, files: [makeFile(), makeDerivedFile()] });
     expect(readme).toContain('area_geo_join.csv');
-    expect(readme).toMatch(/12本/);
+    expect(readme).toMatch(/13本/);
   });
 });
