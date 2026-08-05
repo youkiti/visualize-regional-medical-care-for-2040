@@ -811,7 +811,8 @@ table.facility-table thead th {
 }
 
 .facility-function-badge,
-.facility-badge-unmapped {
+.facility-badge-unmapped,
+.facility-badge-reference {
   display: inline-block;
   padding: 1px 5px;
   border-radius: 3px;
@@ -829,6 +830,15 @@ table.facility-table thead th {
   background: #fdf0d5;
   border: 1px solid #e3b341;
   color: var(--color-text-primary);
+}
+
+/* 医療情報ネット由来の座標（M13）。地図には出る＝警告ではないので
+   .facility-badge-unmapped の amber ではなく、出所を静かに示すだけの
+   中立トーン（青系）にする。 */
+.facility-badge-reference {
+  background: #e6eef7;
+  border: 1px solid #a9c6e8;
+  color: var(--color-text-secondary);
 }
 
 tr.facility-detail-row td {

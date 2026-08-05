@@ -13,6 +13,11 @@ interface FacilityListProps {
   onRetry: () => void;
   metrics: FacilityMetric[];
   valueStatusLabels: Record<FacilityValueStatus, string>;
+  /** facility_summary.jsonのmetadata.geo_audit_source.reference_snapshot_date
+   * （'2025-06-01'）。医療情報ネット由来の座標バッジ・カバレッジ行に使う。
+   * buildFacilityCsv・SourceNotesと同じくmetadata由来で、コンポーネントに
+   * 日付リテラルを持たせない（M13 must-fix）。 */
+  referenceSnapshotDate: string;
   /** この区域の医療機関一覧をCSVでダウンロードする（lib/downloads.ts buildFacilityCsv）。 */
   onDownloadFacilities: () => void;
 }
@@ -109,6 +114,42 @@ export function coverageBreakdown(coverage: { unmatched: number; withdrawn: numb
   return parts.join('、');
 }
 
+/**
+ * 座標カバレッジの集計。地図に出ない施設は2種類あり、理由が違うので分けて数える:
+ * (a) 名寄せで位置を一意に特定できなかった（座標を与えていない）
+ * (b) 名寄せでは座標が付いたが、別の公表物との検算で1km以上離れていたため
+ *     この可視化サイトでは座標を出さない（coordinate_withdrawn。doc/FACILITY_GEO_AUDIT.md）
+ * 地図に出る施設(mapped)のうち、医療情報ネットの公表座標を採用した件数
+ * （coordinate_source==='iryojoho'）も別途 referenceGeocoded として数える
+ * （P04名寄せで座標が得られなかった施設のみが対象、M13）。
+ * **座標の有無は match_status ではなく coordinates の有無で判定する**
+ * （(b)は match_status==='matched' のまま座標を持たない）。
+ */
+export function computeFacilityCoverage(facilities: Facility[] | null): {
+  mapped: number;
+  unmatched: number;
+  withdrawn: number;
+  referenceGeocoded: number;
+  total: number;
+} {
+  const list = facilities ?? [];
+  let mapped = 0;
+  let unmatched = 0;
+  let withdrawn = 0;
+  let referenceGeocoded = 0;
+  for (const f of list) {
+    if (f.coordinates) {
+      mapped += 1;
+      if (f.coordinate_source === 'iryojoho') referenceGeocoded += 1;
+    } else if (f.coordinate_withdrawn) {
+      withdrawn += 1;
+    } else {
+      unmatched += 1;
+    }
+  }
+  return { mapped, unmatched, withdrawn, referenceGeocoded, total: list.length };
+}
+
 export default function FacilityList({
   facilityCount,
   status,
@@ -117,6 +158,7 @@ export default function FacilityList({
   onRetry,
   metrics,
   valueStatusLabels,
+  referenceSnapshotDate,
   onDownloadFacilities,
 }: FacilityListProps) {
   // 区域を切り替えるたびにこのコンポーネント自体がAreaPanel側でkey={area_code}
@@ -137,25 +179,7 @@ export default function FacilityList({
     [facilities, valueStatusLabels]
   );
 
-  // 地図に出ない施設は2種類あり、理由が違うので分けて数える:
-  // (a) 名寄せで位置を一意に特定できなかった（座標を与えていない）
-  // (b) 名寄せでは座標が付いたが、別の公表物との検算で1km以上離れていたため
-  //     この可視化サイトでは座標を出さない（coordinate_withdrawn。
-  //     doc/FACILITY_GEO_AUDIT.md）
-  // **座標の有無は match_status ではなく coordinates の有無で判定する**
-  // （(b)は match_status==='matched' のまま座標を持たない）。
-  const coverage = useMemo(() => {
-    const list = facilities ?? [];
-    let mapped = 0;
-    let unmatched = 0;
-    let withdrawn = 0;
-    for (const f of list) {
-      if (f.coordinates) mapped += 1;
-      else if (f.coordinate_withdrawn) withdrawn += 1;
-      else unmatched += 1;
-    }
-    return { mapped, unmatched, withdrawn, total: list.length };
-  }, [facilities]);
+  const coverage = useMemo(() => computeFacilityCoverage(facilities), [facilities]);
 
   // 「一覧をCSV」は取得済み(status==='loaded')かつ1件以上のときだけ活性にする
   // （brief記載どおり）。非活性の理由はtitleで説明する。
@@ -242,6 +266,21 @@ export default function FacilityList({
                                 {fn}
                               </span>
                             ))}
+                            {facility.coordinates && facility.coordinate_source === 'iryojoho' && (
+                              // 座標源は既定でP04名寄せ（無印）。医療情報ネット由来は
+                              // P04名寄せで座標が得られなかった施設を補完したもの(758件)
+                              // なので、出所が分かるようにバッジを付ける。「公表座標」の
+                              // ような曖昧な語ではなく出典名（医療情報ネット・参照時点）を
+                              // 明示する（briefの指示どおり）。参照時点はfacility_summary.json
+                              // のmetadataから渡された値を使い、コンポーネントに日付リテラルを
+                              // 持たせない（buildFacilityCsv・SourceNotesと同じ規律、M13 must-fix）。
+                              <span
+                                className="facility-badge-reference"
+                                title={`この医療機関の座標は、国土数値情報P04との名寄せでは得られず、医療情報ネット（医療機能情報提供制度、${referenceSnapshotDate}時点の公表データ）の公表座標を採用したものです`}
+                              >
+                                座標: 医療情報ネット（{referenceSnapshotDate}）
+                              </span>
+                            )}
                             {!facility.coordinates &&
                               (facility.coordinate_withdrawn ? (
                                 <span
@@ -297,6 +336,15 @@ export default function FacilityList({
             地図に表示：<strong>{coverage.mapped}件</strong> / この区域の{coverage.total}件
             {coverage.mapped < coverage.total && `（${coverageBreakdown(coverage)}）`}
           </p>
+          {/* うち医療情報ネット由来の件数。0件の区域では出さない（意味の無い
+              「うち0件」を出さないため、coverageBreakdown()と同じ規律）。参照時点は
+              referenceSnapshotDateプロパティ（metadata由来）を使う。 */}
+          {coverage.referenceGeocoded > 0 && (
+            <p className="facility-coverage-note">
+              うち医療情報ネット（{referenceSnapshotDate}時点）の公表座標：<strong>{coverage.referenceGeocoded}件</strong>
+              （国土数値情報P04との名寄せでは座標が得られなかった施設を補完）
+            </p>
+          )}
           {coverage.unmatched > 0 && (
             <p className="facility-legend-note">
               「地図に表示なし」＝名寄せで位置を一意に特定できなかったため座標を与えていない医療機関です（位置の推測はしません）。

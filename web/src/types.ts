@@ -360,12 +360,29 @@ export interface Facility {
   functions?: string[];
   /**
    * P04名寄せの結果そのもの。'matched'=名寄せでは座標が付いた /
-   * 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。
-   * **match_status==='matched' でも coordinates を持つとは限らない**（下記 coordinate_withdrawn）。
+   * 'candidate_only'・'unmatched'=P04名寄せでは座標なし（位置の推測はしない、
+   * doc/REQUIREMENTS.md §4.3）。
+   * **座標の有無はmatch_statusから導けない**（CLAUDE.md「可視化実装で判明した罠」36）:
+   * 'matched'でも検算(facility_geo_audit.csv)で取り下げていればcoordinatesを持たない
+   * （下記coordinate_withdrawn）。逆に'matched'でなくても、医療情報ネットの公表座標を
+   * 採用していれば（coordinate_source==='iryojoho'）coordinatesを持つ（M13）。
+   * **座標の有無は必ずcoordinatesキーの有無で判定すること。**
    */
   match_status: FacilityMatchStatus;
-  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' かつ検算で取り下げていない施設のみ存在する。 */
+  /**
+   * [経度, 緯度]（度、JGD2011）。座標が特定できた施設にのみ存在する
+   * （doc/REQUIREMENTS.md §4.3「位置の推測はしない」）。存在する施設は必ず
+   * coordinate_sourceも持つ（座標源の内訳はcoordinate_source参照）。
+   */
   coordinates?: [number, number];
+  /**
+   * 座標の出所。coordinatesを持つ施設にのみ存在する（持たない施設ではキー自体を省略）。
+   * 'ksj_p04'=国土数値情報P04-20とのP04名寄せ由来（match_status==='matched'かつ
+   * 検算で取り下げていない施設）。
+   * 'iryojoho'=医療情報ネットの公表座標を採用（P04名寄せで座標が得られず、医療情報
+   * ネット側で一意に同定できた施設のみ、M13）。
+   */
+  coordinate_source?: 'ksj_p04' | 'iryojoho';
   /**
    * trueなら、P04名寄せでは座標が付いたが、医療情報ネットの公表座標との検算で1km以上
    * 離れていた（doc/FACILITY_GEO_AUDIT.md）ため座標を出していないことを表す。
@@ -381,8 +398,12 @@ export interface FacilityShard {
   pref_code: string;
   pref_name: string;
   facility_count: number;
-  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。座標源は2系統
+   * （P04名寄せ由来+医療情報ネット由来）の合計。 */
   geocoded_count: number;
+  /** geocoded_countのうち、医療情報ネットの公表座標を採用した(coordinate_source==='iryojoho')
+   * 施設数。P04名寄せで座標が得られなかった施設のみが対象（M13）。 */
+  reference_geocoded_count: number;
   /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
   coordinate_withdrawn_count: number;
   facilities: Facility[];
@@ -392,8 +413,12 @@ export interface FacilityShard {
 export interface FacilitySummaryArea {
   area_code: string;
   facility_count: number;
-  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。座標源は2系統
+   * （P04名寄せ由来+医療情報ネット由来）の合計。 */
   geocoded_count: number;
+  /** geocoded_countのうち、医療情報ネットの公表座標を採用した(coordinate_source==='iryojoho')
+   * 施設数。P04名寄せで座標が得られなかった施設のみが対象（M13）。 */
+  reference_geocoded_count: number;
   /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
   coordinate_withdrawn_count: number;
 }
@@ -428,17 +453,41 @@ export interface FacilityGeoLinkageSource {
   derived_via: Array<{ csv: string; meta: string }>;
 }
 
+/**
+ * facility_geo_audit.csv（付与済み座標 × 医療情報ネットの公表座標の検算、M13）由来の
+ * 出典ブロック。FacilitySource/FacilityGeoLinkageSourceのどちらともキー集合が異なる
+ * 第3の形（CLAUDE.md「可視化実装で判明した罠」11）: license・fiscal_year・
+ * acquired_date・source_file・source_sha256を持たない。代わりに参照データの時点を
+ * reference_snapshot_dateで示す。
+ */
+export interface FacilityGeoAuditSource {
+  name: string;
+  inputs: Array<{ file: string; role: string; source_sha256: string }>;
+  page_url: string;
+  /** 医療情報ネットの公表データの参照時点（'2025-06-01'固定）。 */
+  reference_snapshot_date: string;
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
 export interface FacilityProcessing {
   script: string;
   inputs: Array<{ path: string; sha256: string }>;
   steps: string[];
-  /** 入力CSV4本ぶんのcaveatを持つオブジェクト（AreaIndicatorsProcessing.caveatの
-   * 単一文字列ともAreaDemandProcessing.caveatの2キーとも形が違う）。 */
+  /** 入力CSV5本ぶんのcaveat + 本スクリプトの判断1件(coordinate_adoption)を持つ
+   * オブジェクト（AreaIndicatorsProcessing.caveatの単一文字列ともAreaDemand
+   * Processing.caveatの2キーとも形が違う）。当初4キー、M10でfacility_geo_audit
+   * （座標の検算）が加わり5キー、M13でcoordinate_adoption（座標源の採用方針の
+   * 説明。入力CSV由来ではなくbuild_web_facilities.py自身の判断）が加わり6キーに
+   * なった。 */
   caveat: {
     facility_basic: string;
     facility_observations: string;
     facility_functions: string;
     facility_geo_linkage: string;
+    /** 付与済み座標の検算（医療情報ネットとの比較）についての説明（M10）。 */
+    facility_geo_audit: string;
+    /** 座標源が2系統（P04名寄せ優先・医療情報ネットで補完）であることの説明（M13）。 */
+    coordinate_adoption: string;
   };
 }
 
@@ -446,6 +495,8 @@ export interface FacilitySummaryMetadata {
   title: string;
   source: FacilitySource;
   geo_linkage_source: FacilityGeoLinkageSource;
+  /** 付与済み座標の検算（医療情報ネットとの比較）由来の出典ブロック（M13）。 */
+  geo_audit_source: FacilityGeoAuditSource;
   processing: FacilityProcessing;
   fields: Record<string, string>;
   known_issues: KnownIssue[];

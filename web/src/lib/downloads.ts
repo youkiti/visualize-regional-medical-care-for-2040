@@ -82,8 +82,10 @@ interface PreambleOptions {
   source: PreambleSource;
   condition: string;
   caveat: string;
-  /** 医療機関CSV用: 座標の出典（原典が2系統のため）。「掲載ページ」行の次に1行足す。 */
-  extraSourceLine?: string;
+  /** 医療機関CSV用: 座標の出典（原典が2系統のため）。「掲載ページ」行の次に足す。
+   * M13以降、医療機関CSVは座標源自体が2系統（P04名寄せ+医療情報ネット）になったため
+   * 配列も受け付ける（1行/系統ずつ）。単一文字列も引き続き使える（他CSVの1系統のみの用途）。 */
+  extraSourceLine?: string | string[];
   /** 追加の注記行（例:「注記（医療需要推計）: …」）。主注記の直後に足す。 */
   extraCaveatLines?: string[];
 }
@@ -99,7 +101,9 @@ function buildPreamble(opts: PreambleOptions): string[] {
     `掲載ページ: ${source.page_url}`,
     `取得日: ${source.acquired_date} / 利用規約: ${source.license}`,
   ];
-  if (extraSourceLine) lines.push(extraSourceLine);
+  if (extraSourceLine) {
+    lines.push(...(Array.isArray(extraSourceLine) ? extraSourceLine : [extraSourceLine]));
+  }
   lines.push(`出力条件: ${condition}`);
   lines.push(`注記: ${caveat}`);
   lines.push(...extraCaveatLines);
@@ -638,6 +642,7 @@ const FACILITY_HEADER = [
   'value_status_label',
   'functions',
   'match_status',
+  'coordinate_source',
   'lon',
   'lat',
 ];
@@ -651,8 +656,10 @@ export interface BuildFacilityCsvArgs {
 
 /**
  * 選択区域の医療機関 × 21指標をlong形式（施設数×metrics.length行）で出す。
- * 座標を持たない施設（match_status!=='matched'）も行としては必ず出す
- * （位置の推測はしない、doc/REQUIREMENTS.md §4.3）。
+ * 座標を持たない施設（coordinatesキーが無い施設。座標の有無はmatch_statusでは
+ * 判定しない — CLAUDE.md「可視化実装で判明した罠」36）も行としては必ず出す
+ * （位置の推測はしない、doc/REQUIREMENTS.md §4.3）。coordinate_source列は座標を
+ * 持つ行のみ'ksj_p04'/'iryojoho'が入り、持たない行は空欄（M13）。
  */
 export function buildFacilityCsv(args: BuildFacilityCsvArgs): DownloadCsv {
   const { shard, metrics, valueStatusLabels, facilitySummaryMetadata } = args;
@@ -663,6 +670,7 @@ export function buildFacilityCsv(args: BuildFacilityCsvArgs): DownloadCsv {
     const functionsField = facility.functions ? facility.functions.join(';') : '';
     const lon = facility.coordinates ? facility.coordinates[0] : null;
     const lat = facility.coordinates ? facility.coordinates[1] : null;
+    const coordinateSource = facility.coordinate_source ?? '';
     metrics.forEach((metric, i) => {
       const status = facility.value_status[i];
       const value = status === 'observed' ? facility.values[i] : null;
@@ -678,6 +686,7 @@ export function buildFacilityCsv(args: BuildFacilityCsvArgs): DownloadCsv {
         valueStatusLabels[status],
         functionsField,
         facility.match_status,
+        coordinateSource,
         lon,
         lat,
       ]);
@@ -686,8 +695,18 @@ export function buildFacilityCsv(args: BuildFacilityCsvArgs): DownloadCsv {
 
   const condition = `対象=構想区域 ${shard.area_code} ${shard.area_name}（${shard.pref_name}）の医療機関 ${shard.facility_count}件 × ${metrics.length}指標`;
   const geoSource = facilitySummaryMetadata.geo_linkage_source;
-  const extraSourceLine = `座標の出典: ${geoSource.name} / ${geoSource.page_url}`;
-  const extraCaveatLines = [`注記（座標）: ${facilitySummaryMetadata.processing.caveat.facility_geo_linkage}`];
+  const geoAuditSource = facilitySummaryMetadata.geo_audit_source;
+  // 座標源は2系統（M13）。P04名寄せ（既定）に加え、それで座標が得られなかった
+  // 施設を補完した医療情報ネット由来ぶんの出典行を追加する。
+  const extraSourceLine = [
+    `座標の出典（国土数値情報P04との名寄せ）: ${geoSource.name} / ${geoSource.page_url}`,
+    `座標の出典（医療情報ネット、P04名寄せで座標が得られなかった施設のみ）: ${geoAuditSource.name} / ` +
+      `${geoAuditSource.page_url}（参照時点: ${geoAuditSource.reference_snapshot_date}）`,
+  ];
+  const extraCaveatLines = [
+    `注記（座標・P04名寄せ）: ${facilitySummaryMetadata.processing.caveat.facility_geo_linkage}`,
+    `注記（座標源の採用方針）: ${facilitySummaryMetadata.processing.caveat.coordinate_adoption}`,
+  ];
   const preamble = buildPreamble({
     source: facilitySummaryMetadata.source,
     condition,

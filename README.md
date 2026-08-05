@@ -12,7 +12,7 @@
 - **可視化する指標**:
   - 病床機能別（高度急性期/急性期/回復期/慢性期）の病床数と将来必要量の比較
   - 在宅（訪問診療）・外来の医療需要推計（2024→2050年度、年度スライダー）
-  - 医療機関別の病床数・診療実績・医師数
+  - 医療機関別の病床数・診療実績・医師数（地図ポイントの座標は国土数値情報P04との名寄せを優先し、それで位置が定まらない施設は医療情報ネットの公表座標を名称・都道府県・市区町村・一意性の複合確認ができた場合のみ採用。座標源は出所つきで画面・CSVに表示）
   - 患者の流入・流出（NDB 2024年度、構想区域間・3区分別。相手区域の内訳と地図での塗り分け）
   - 公表年度間の比較（R6→R7）: 見込量比（2025年）・実績の1年変化（2024→2025）
 - **CSV ダウンロード**:
@@ -97,3 +97,4 @@ npm run dev
 - [x] R6公表分の①②を出力対象化し、R6→R7の年度間比較を検証・実装（`tools/verify_yoy_R6_R7.py` → [doc/YOY_VERIFICATION.md](doc/YOY_VERIFICATION.md)、`tools/build_web_yoy.py` → `data/processed/area_yoy_R6_R7.json`、画面に「公表年度間の比較（R6→R7）」として追加）
 - [x] 都道府県ぶんの絞り込みCSV（地図に表示中の指標を全47都道府県ぶん／選択都道府県1つの詳細）
 - [x] 都道府県層の年度間比較（`tools/build_web_prefecture_yoy.py` → `data/processed/prefecture_yoy_R6_R7.json`。表示単位トグルが全指標で成立）
+- [x] 医療機関座標の統合（医療情報ネットの公表座標を、国土数値情報P04で位置が定まらない施設への座標源として条件付きで採用。`tools/build_web_facilities.py` → `data/processed/area_facilities_R7.json`。地図に出る座標は10,244件→**10,926件（92.9%）**に増加。判断記録は [doc/DECISION_FACILITY_COORDINATES.md](doc/DECISION_FACILITY_COORDINATES.md)）

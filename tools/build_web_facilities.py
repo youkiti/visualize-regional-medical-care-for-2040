@@ -128,12 +128,43 @@ EXPECTED_GEOCODED_COUNT = 10244
 # 1km以上離れていた件数。**この施設の座標は画面に出さない**(下記
 # AUDIT_STATUS_CONFLICT の扱い、doc/FACILITY_GEO_AUDIT.md参照)。
 EXPECTED_COORDINATE_WITHDRAWN_COUNT = 76
-# 実際に地図へ出す座標の件数。
-EXPECTED_DISPLAYED_COORDINATE_COUNT = EXPECTED_GEOCODED_COUNT - EXPECTED_COORDINATE_WITHDRAWN_COUNT
+# P04名寄せで座標が付かなかった施設(1,516件)のうち、医療情報ネットの公表座標
+# (facility_geo_audit.csv)で一意に同定できた(reference_status=='unique')ため
+# 座標源として採用した件数(M13で座標源が2系統になった)。
+EXPECTED_REFERENCE_ADOPTED_COUNT = 758
+# 上記のうち、reference_status=='unique_municipality_unverified'
+# (原典の病床機能報告が未報告で所在地欄が空のため市区町村を検証できない)
+# として採用しなかった件数。
+EXPECTED_REFERENCE_UNVERIFIED_COUNT = 72
+# 採用した758件のうち、参照座標が落ちる構想区域(reference_area_code)が原典の
+# area_codeと異なる件数(非空)。棄却理由ではなく観測事実として件数を固定する
+# (名称・市区町村までは一致を確認済みで、区域判定の食い違いは境界ポリゴン側の
+# 誤差の問題であり、施設同一性を否定する材料ではないため採用の可否には影響しない)。
+EXPECTED_REFERENCE_AREA_CODE_MISMATCH_COUNT = 9
+# 採用した758件のうち、参照座標がどの構想区域ポリゴンにも属さない(空)件数。
+# 上記と同じく観測事実であり、採用の可否には影響しない。
+EXPECTED_REFERENCE_AREA_CODE_MISSING_COUNT = 3
+# 実際に地図へ出す座標の件数。P04名寄せ由来(取り下げ76件を除く)+
+# 医療情報ネット由来(採用758件)の合計。
+EXPECTED_DISPLAYED_COORDINATE_COUNT = (
+    EXPECTED_GEOCODED_COUNT - EXPECTED_COORDINATE_WITHDRAWN_COUNT + EXPECTED_REFERENCE_ADOPTED_COUNT
+)
 
 # facility_geo_audit.csvのaudit_status。付与済み座標と参照座標が離れすぎて
 # いる(=2つの公表物が別の位置を示している)ことを表す値。
 AUDIT_STATUS_CONFLICT = "conflict"
+
+# facility_geo_audit.csvのreference_status。医療情報ネット側の座標を座標源
+# として採用してよいかどうかの判定に使う2値のみ定数化する(他の値
+# (none/municipality_mismatch/ambiguous)は「採用しない」で一括りに扱うため
+# 定数化しない)。
+REFERENCE_STATUS_UNIQUE = "unique"
+REFERENCE_STATUS_UNIQUE_MUNICIPALITY_UNVERIFIED = "unique_municipality_unverified"
+
+# facilities[].coordinate_sourceの2値。座標源がどちらの公表物由来かを表す
+# (M13。P04名寄せが優先、医療情報ネットは補完)。
+COORDINATE_SOURCE_KSJ_P04 = "ksj_p04"
+COORDINATE_SOURCE_IRYOJOHO = "iryojoho"
 
 # 日本の陸域を大きく包含する範囲(検証9)。与那国島(東経約122.9度)から
 # 南鳥島(東経約153.98度)、沖ノ鳥島(北緯約20.4度)から択捉島(北緯約45.5度)
@@ -241,8 +272,13 @@ FIELD_DESCRIPTIONS = {
     "facility_count": "この区域に属する医療機関数(facility_basic.csvの行数)",
     "geocoded_count": (
         "この区域内で実際にcoordinatesを持つ(=地図に点として出る)医療機関数。"
+        "座標源は2系統(P04名寄せ由来+医療情報ネット由来)あり、両方の合計。"
         "match_status=='matched'であっても、検算で座標を取り下げた施設"
         "(coordinate_withdrawnがtrue)はここに数えない"
+    ),
+    "reference_geocoded_count": (
+        "geocoded_countのうち、医療情報ネットの公表座標を採用した(coordinate_source=="
+        "'iryojoho')医療機関数。P04名寄せで座標が得られなかった施設のみが対象"
     ),
     "coordinate_withdrawn_count": (
         "この区域内で、P04名寄せでは座標が付いたが検算(facility_geo_audit.csv)で"
@@ -272,13 +308,26 @@ FIELD_DESCRIPTIONS = {
         "機械的に判別できないため)"
     ),
     "facilities[].match_status": (
-        "facility_geo_linkage.csvのmatch_status(全施設に必ず存在)。'matched'=座標あり/"
-        "'candidate_only'=あいまい一致の候補のみ(座標なし)/'unmatched'=候補なしまたは"
-        "信頼できる候補が絞れない(座標なし)。詳細はdoc/FACILITY_LINKAGE.md参照"
+        "facility_geo_linkage.csvのmatch_status(全施設に必ず存在)。'matched'=P04名寄せが"
+        "一意に決まった/'candidate_only'=あいまい一致の候補のみ/'unmatched'=候補なしまたは"
+        "信頼できる候補が絞れない。詳細はdoc/FACILITY_LINKAGE.md参照。**座標の有無は"
+        "match_statusからは導けない**('matched'でも検算(facility_geo_audit.csv)で"
+        "取り下げていれば座標なし。'matched'でなくても医療情報ネットの公表座標を採用"
+        "していれば座標あり。座標の有無はcoordinatesキーの有無で判定すること"
+        "(coordinate_sourceは座標を持つ施設について出所を知りたいときに見るもの、"
+        "という位置づけ)"
     ),
     "facilities[].coordinates": (
-        "[経度, 緯度](度、JGD2011)。match_status=='matched'かつ検算で取り下げていない"
-        "施設のみ存在する(位置の推測はしない方針、doc/REQUIREMENTS.md §4.3参照)。座標は丸めない"
+        "[経度, 緯度](度、JGD2011)。位置の推測はしない方針により、座標が特定できた"
+        "施設にのみ存在する(doc/REQUIREMENTS.md §4.3参照)。本フィールドを持つ施設は"
+        "必ずcoordinate_sourceも持つ(座標源の内訳はcoordinate_source参照)。座標は丸めない"
+    ),
+    "facilities[].coordinate_source": (
+        "座標の出所。'ksj_p04'=国土数値情報P04-20とのP04名寄せ由来(facility_geo_linkage.csv、"
+        "match_status=='matched'かつ検算で取り下げていない施設)/'iryojoho'=医療情報ネットの"
+        "公表座標を採用(facility_geo_audit.csv、P04名寄せで座標が得られず医療情報ネット側で"
+        "reference_status=='unique'と一意に同定できた758件のみ、M13)。coordinatesを持つ"
+        "施設にのみ存在し、持たない施設ではキー自体を省略する"
     ),
     "facilities[].coordinate_withdrawn": (
         "trueの場合、P04名寄せでは座標が付いた(match_status=='matched')が、"
@@ -317,11 +366,15 @@ def _to_number(raw: str):
 def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, audit_rows, geo_codes):
     """検証1〜11を行い、違反があれば SystemExit で中断する。
 
-    戻り値: (basic_id_set, obs_index, geo_index, functions_index)
+    戻り値: (basic_id_set, obs_index, geo_index, functions_index, withdrawn, reference_adopted)
       basic_id_set: facility_basic.csvのrecord_idの集合
       obs_index: {record_id: {metric_key: (value, value_status)}} (21件ずつ)
       geo_index: {record_id: (match_status, [lon, lat] または None)}
       functions_index: {record_id: [function_name, ...]} (該当が無い施設はキー自体が無い)
+      withdrawn: 検算(facility_geo_audit.csv)で座標を取り下げたrecord_idの集合
+      reference_adopted: {record_id: [lon, lat]} P04名寄せで座標が無い施設のうち、
+        医療情報ネットの公表座標(facility_geo_audit.csv)を座標源として採用した
+        ものだけを持つ(M13)
     """
     # 検証1: published_fyが全てR7(facility_basic.csv/facility_observations.csv/
     # facility_functions.csv)。facility_geo_linkage.csvにはpublished_fy列が無い
@@ -521,6 +574,68 @@ def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, au
             f"(検算は座標がある施設にのみ成立するはずです): {without_coordinate[:10]}"
         )
 
+    # 検証15: facility_geo_audit.csv(医療情報ネットの公表座標)を、P04名寄せで
+    # 座標が付かなかった施設(coordinates is None)への補完として採用する
+    # (M13)。P04が優先なので、coordinates is not Noneの行ではreference関連
+    # 列を一切見ない。
+    reference_adopted = {}
+    reference_unverified_count = 0
+    reference_area_mismatch_count = 0
+    reference_area_missing_count = 0
+    lon_min, lon_max = JAPAN_LON_RANGE
+    lat_min, lat_max = JAPAN_LAT_RANGE
+    for r in audit_rows:
+        rid = r["record_id"]
+        _, coordinates = geo_index[rid]
+        if coordinates is not None:
+            continue
+        ref_status = r["reference_status"]
+        if ref_status == REFERENCE_STATUS_UNIQUE:
+            lon_raw = r["reference_longitude"]
+            lat_raw = r["reference_latitude"]
+            if lon_raw == "" or lat_raw == "":
+                raise SystemExit(
+                    "検証15失敗: reference_status=='unique'なのにreference_longitude/"
+                    f"reference_latitudeが空です(record_id={rid})"
+                )
+            lon = float(lon_raw)
+            lat = float(lat_raw)
+            if not (lon_min <= lon <= lon_max):
+                raise SystemExit(f"検証15失敗: record_id={rid}の参照経度が日本の範囲外です: {lon}")
+            if not (lat_min <= lat <= lat_max):
+                raise SystemExit(f"検証15失敗: record_id={rid}の参照緯度が日本の範囲外です: {lat}")
+            reference_adopted[rid] = [lon, lat]
+            ref_area_code = r["reference_area_code"]
+            if ref_area_code == "":
+                reference_area_missing_count += 1
+            elif ref_area_code != r["area_code"]:
+                reference_area_mismatch_count += 1
+        elif ref_status == REFERENCE_STATUS_UNIQUE_MUNICIPALITY_UNVERIFIED:
+            reference_unverified_count += 1
+
+    if len(reference_adopted) != EXPECTED_REFERENCE_ADOPTED_COUNT:
+        raise SystemExit(
+            "検証15失敗: 医療情報ネット座標を採用した件数が"
+            f"{EXPECTED_REFERENCE_ADOPTED_COUNT}件ちょうどではありません(実際{len(reference_adopted)}件)"
+        )
+    if reference_unverified_count != EXPECTED_REFERENCE_UNVERIFIED_COUNT:
+        raise SystemExit(
+            f"検証15失敗: reference_status=='{REFERENCE_STATUS_UNIQUE_MUNICIPALITY_UNVERIFIED}'の件数が"
+            f"{EXPECTED_REFERENCE_UNVERIFIED_COUNT}件ちょうどではありません(実際{reference_unverified_count}件)"
+        )
+    if reference_area_mismatch_count != EXPECTED_REFERENCE_AREA_CODE_MISMATCH_COUNT:
+        raise SystemExit(
+            "検証15失敗: 採用した座標のうちreference_area_codeがarea_codeと異なる件数が"
+            f"{EXPECTED_REFERENCE_AREA_CODE_MISMATCH_COUNT}件ちょうどではありません"
+            f"(実際{reference_area_mismatch_count}件)"
+        )
+    if reference_area_missing_count != EXPECTED_REFERENCE_AREA_CODE_MISSING_COUNT:
+        raise SystemExit(
+            "検証15失敗: 採用した座標のうちreference_area_codeが空の件数が"
+            f"{EXPECTED_REFERENCE_AREA_CODE_MISSING_COUNT}件ちょうどではありません"
+            f"(実際{reference_area_missing_count}件)"
+        )
+
     # 検証10: facility_functions.csvのrecord_idがfacility_basic.csvの部分集合
     functions_index = {}
     for r in function_rows:
@@ -529,16 +644,22 @@ def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, au
             raise SystemExit(f"検証10失敗: facility_functions.csvにfacility_basic.csvに無いrecord_idがあります: {rid!r}")
         functions_index.setdefault(rid, []).append(r["function_name"])
 
-    return basic_id_set, obs_index, geo_index, functions_index, withdrawn
+    return basic_id_set, obs_index, geo_index, functions_index, withdrawn, reference_adopted
 
 
-def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn):
+def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn, reference_adopted):
     """facility_basic.csvの行をarea_codeごとにまとめ、検証12を満たす
     areas配列を組み立てる(area_code昇順、facilitiesはsource_row昇順)。
 
     `withdrawn`は検算(facility_geo_audit.csv)で座標を取り下げたrecord_idの集合。
     該当施設は`coordinates`を出力せず`coordinate_withdrawn`をtrueにする
     (一覧からは消さない。全21指標はそのまま出す)。
+
+    `reference_adopted`はP04名寄せで座標が無い施設のうち、医療情報ネットの
+    公表座標を座標源として採用したrecord_id -> [lon, lat](M13)。座標決定の
+    優先順位は (1) 検算で取り下げなら座標なし (2) P04名寄せの座標があれば
+    それを使う(coordinate_source='ksj_p04') (3) 医療情報ネット採用なら
+    それを使う(coordinate_source='iryojoho') (4) いずれも無ければ座標なし。
     """
     by_area = {}
     for r in basic_rows:
@@ -551,6 +672,7 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn):
 
         facilities = []
         geocoded_count = 0
+        reference_geocoded_count = 0
         withdrawn_count = 0
         for r in rows:
             rid = r["record_id"]
@@ -583,7 +705,14 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn):
                 withdrawn_count += 1
             elif coordinates is not None:
                 facility["coordinates"] = coordinates
+                facility["coordinate_source"] = COORDINATE_SOURCE_KSJ_P04
                 geocoded_count += 1
+            elif rid in reference_adopted:
+                # P04名寄せで座標が無い施設への補完(M13)。
+                facility["coordinates"] = list(reference_adopted[rid])
+                facility["coordinate_source"] = COORDINATE_SOURCE_IRYOJOHO
+                geocoded_count += 1
+                reference_geocoded_count += 1
 
             facilities.append(facility)
 
@@ -595,6 +724,7 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn):
                 "pref_name": first["pref_name"],
                 "facility_count": len(facilities),
                 "geocoded_count": geocoded_count,
+                "reference_geocoded_count": reference_geocoded_count,
                 "coordinate_withdrawn_count": withdrawn_count,
                 "facilities": facilities,
             }
@@ -608,6 +738,15 @@ def validate_areas_output(areas, basic_id_set) -> None:
     完全一致することを確認する(「区域へ重複なく割り当てられた」ことの
     最終防衛線。検証3・5・12は個々のCSVの整合を保証するが、build_areas()の
     グルーピング自体にバグがあった場合は出力後の構造を見ないと検出できない)。
+
+    検証16: 出力(areas[].facilities)に対して座標関連キーの不変条件を確認する
+    (build_metadata()のprocessing.stepsが主張している内容をビルド時に担保する。
+    これまでpytest側にしか無かった検査で、build_areas()の分岐が正しく実装
+    されていれば通るはずだが、出力後の構造に対する独立の防衛線として置く)。
+      - coordinatesを持つ施設は必ずcoordinate_sourceを持ち、値は
+        COORDINATE_SOURCE_KSJ_P04・COORDINATE_SOURCE_IRYOJOHOのいずれかである
+      - coordinatesを持たない施設はcoordinate_sourceを持たない
+      - coordinate_withdrawnがtrueの施設はcoordinatesを持たない
     """
     all_ids = [f["record_id"] for area in areas for f in area["facilities"]]
     if len(all_ids) != NUM_FACILITIES:
@@ -624,6 +763,29 @@ def validate_areas_output(areas, basic_id_set) -> None:
             "検証13失敗: areas[].facilitiesのrecord_id集合がfacility_basic.csvと一致しません。"
             f"不足={sorted(basic_id_set - output_id_set)[:10]} 余剰={sorted(output_id_set - basic_id_set)[:10]}"
         )
+
+    known_coordinate_sources = {COORDINATE_SOURCE_KSJ_P04, COORDINATE_SOURCE_IRYOJOHO}
+    for area in areas:
+        for f in area["facilities"]:
+            rid = f["record_id"]
+            has_coordinates = "coordinates" in f
+            has_source = "coordinate_source" in f
+            if has_coordinates and not has_source:
+                raise SystemExit(
+                    f"検証16失敗: record_id={rid}はcoordinatesを持ちながらcoordinate_sourceを持ちません"
+                )
+            if has_source and not has_coordinates:
+                raise SystemExit(
+                    f"検証16失敗: record_id={rid}はcoordinate_sourceを持ちながらcoordinatesを持ちません"
+                )
+            if has_source and f["coordinate_source"] not in known_coordinate_sources:
+                raise SystemExit(
+                    f"検証16失敗: record_id={rid}のcoordinate_sourceが未知の値です: {f['coordinate_source']!r}"
+                )
+            if f.get("coordinate_withdrawn") and has_coordinates:
+                raise SystemExit(
+                    f"検証16失敗: record_id={rid}はcoordinate_withdrawn=trueなのにcoordinatesを持っています"
+                )
 
 
 def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, audit_meta, inputs) -> dict:
@@ -667,14 +829,42 @@ def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, audi
         },
     ]
 
+    # facility_geo_audit.csv.meta.jsonもP04本体とは異なる形(name/inputs/
+    # page_url/reference_snapshot_dateのみで、source_file/source_sha256を
+    # 持たない)。M13で医療情報ネットの公表座標を座標源として採用したため、
+    # geo_linkage_sourceと同じ流儀で独立キー(geo_audit_source)に格納する。
+    geo_audit_source = dict(audit_meta["source"])
+    geo_audit_source["derived_via"] = [
+        {
+            "csv": "data/processed/facility_geo_audit.csv",
+            "meta": "data/processed/facility_geo_audit.csv.meta.json",
+        },
+    ]
+
     # 入力CSVごとにcaveatの内容が異なるため、入力CSV名をキーにした辞書で
     # 全部保持する(1つ選ぶと他の注記が失われる。build_web_demand.pyと同じ判断)。
+    # 'coordinate_adoption'のみ入力CSV名ではなく、本スクリプトが下す座標源
+    # 採用方針そのものの説明(厚労省公表物の欠陥ではないためknown_issuesには
+    # 入れない。CLAUDE.md「欠陥でない事実をknown_issuesに入れないこと」M12)。
     caveat = {
         "facility_basic": basic_meta["processing"]["caveat"],
         "facility_observations": observations_meta["processing"]["caveat"],
         "facility_functions": functions_meta["processing"]["caveat"],
         "facility_geo_linkage": geo_meta["processing"]["caveat"],
         "facility_geo_audit": audit_meta["processing"]["caveat"],
+        "coordinate_adoption": (
+            "座標源は2系統(P04名寄せを優先、医療情報ネットは補完)。P04名寄せで座標が"
+            "付かなかった1,516件のうち、医療情報ネット側で一意に同定できた758件"
+            "(facility_geo_audit.csvのreference_status=='unique')は参照座標を採用した"
+            "(coordinate_source='iryojoho')。残り72件はreference_status=='unique_"
+            "municipality_unverified'(原典の病床機能報告が未報告で所在地欄が空のため"
+            "市区町村を検証できない)として採用しなかった。それ以外の686件"
+            "(none/municipality_mismatch/ambiguous)も座標を与えない。採用した758件のうち"
+            "12件は参照座標が落ちる構想区域(reference_area_code)が原典のarea_codeと異なる"
+            "(9件)か、どの区域にも属さない(3件)が、名称・市区町村までは一致を確認済みで"
+            "あり、区域判定の食い違いは境界ポリゴン側の誤差の問題であって施設同一性を"
+            "否定する材料ではないため、この12件も座標を出す対象に含めている。"
+        ),
     }
 
     # 原典側の既知の欠陥は入力CSVのmeta.jsonから拾って集約する(この場で
@@ -693,6 +883,7 @@ def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, audi
         "title": "構想区域別 医療機関一覧（病床数・医師数・診療実績・機能・座標、可視化サイト表示用）",
         "source": metadata_source,
         "geo_linkage_source": geo_linkage_source,
+        "geo_audit_source": geo_audit_source,
         "processing": {
             "script": "tools/build_web_facilities.py",
             "inputs": inputs,
@@ -731,7 +922,16 @@ def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, audi
                 "facility_geo_linkage.csvと一致し、audit_status=='conflict'が76件ちょうどで、"
                 "その全件が座標を持つ施設であることを確認(検証14)",
                 "audit_status=='conflict'の76件はcoordinatesを出力せずcoordinate_withdrawn=trueに"
-                "する(一覧・21指標はそのまま出す)。地図に出る座標は10,168件になる",
+                "する(一覧・21指標はそのまま出す)",
+                "P04名寄せで座標が付かなかった施設について、facility_geo_audit.csvの"
+                "reference_status=='unique'の758件は医療情報ネットの公表座標を座標源として"
+                "採用し(coordinate_source='iryojoho')、'unique_municipality_unverified'の"
+                "72件・その他686件は採用しないことを確認(検証15)",
+                "coordinatesを出力する施設は必ずcoordinate_sourceを持ち('ksj_p04'または"
+                "'iryojoho')、coordinate_sourceを持つ施設は必ずcoordinatesを持ち、"
+                "coordinate_withdrawn=trueの施設はcoordinatesを持たないことを確認"
+                "(検証16)。地図に出る座標は10,244-76+758=10,926件になる"
+                "(P04由来10,168件+医療情報ネット由来758件)",
             ],
             "caveat": caveat,
         },
@@ -786,29 +986,36 @@ def build_and_write(out_path: Path) -> Path:
         f"area_boundaries_R7.geojson={len(geo_codes)}区域"
     )
 
-    basic_id_set, obs_index, geo_index, functions_index, withdrawn = validate_and_index(
+    basic_id_set, obs_index, geo_index, functions_index, withdrawn, reference_adopted = validate_and_index(
         basic_rows, observation_rows, function_rows, geo_rows, audit_rows, geo_codes
     )
     print(
-        "[ok] 検証1〜11・14: published_fy・record_id一意性(11760)・record_id集合一致・"
+        "[ok] 検証1〜11・14〜15: published_fy・record_id一意性(11760)・record_id集合一致・"
         "area_code集合一致(339)・区域内一貫性・21指標の過不足なし・metric/bed_function既知性・"
         "value_status既知性・value整合・座標整合(10244件)・facility_functions部分集合・"
-        f"検算で取り下げる座標({len(withdrawn)}件)を確認"
+        f"検算で取り下げる座標({len(withdrawn)}件)・医療情報ネット採用座標({len(reference_adopted)}件)を確認"
     )
 
-    areas = build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn)
+    areas = build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn, reference_adopted)
     validate_areas_output(areas, basic_id_set)
     total_facilities = sum(a["facility_count"] for a in areas)
     total_geocoded = sum(a["geocoded_count"] for a in areas)
+    total_reference_geocoded = sum(a["reference_geocoded_count"] for a in areas)
     total_withdrawn = sum(a["coordinate_withdrawn_count"] for a in areas)
     if total_geocoded != EXPECTED_DISPLAYED_COORDINATE_COUNT:
         raise SystemExit(
             f"検証14失敗: 地図に出す座標が{EXPECTED_DISPLAYED_COORDINATE_COUNT}件ちょうどでは"
             f"ありません(実際{total_geocoded}件)"
         )
+    if total_reference_geocoded != EXPECTED_REFERENCE_ADOPTED_COUNT:
+        raise SystemExit(
+            "検証15失敗: 医療情報ネット由来の座標が全区域合計で"
+            f"{EXPECTED_REFERENCE_ADOPTED_COUNT}件ちょうどではありません(実際{total_reference_geocoded}件)"
+        )
     print(
-        f"[ok] areas構築+検証12〜14: {len(areas)}区域 施設計{total_facilities}件"
-        f"(地図に出す座標{total_geocoded}件 / 検算で取り下げ{total_withdrawn}件)"
+        f"[ok] areas構築+検証12〜16: {len(areas)}区域 施設計{total_facilities}件"
+        f"(地図に出す座標{total_geocoded}件[医療情報ネット由来{total_reference_geocoded}件を含む] "
+        f"/ 検算で取り下げ{total_withdrawn}件)"
     )
 
     with open(FACILITY_BASIC_META_PATH, "r", encoding="utf-8") as f:

@@ -25,6 +25,7 @@ function makeFacility(overrides: Partial<Facility> = {}): Facility {
     functions: ['地域支援'],
     match_status: 'matched',
     coordinates: [140.7301711, 41.80541985],
+    coordinate_source: 'ksj_p04',
     ...overrides,
   };
 }
@@ -76,6 +77,29 @@ describe('buildFacilityPoints', () => {
   it('includes beds_total when the metric is observed', () => {
     const result = buildFacilityPoints([makeFacility()], METRICS);
     expect(result.features[0].properties.beds_total).toBe(582);
+  });
+
+  it('carries coordinate_source through verbatim (ksj_p04, the default/majority source)', () => {
+    const result = buildFacilityPoints([makeFacility()], METRICS);
+    expect(result.features[0].properties.coordinate_source).toBe('ksj_p04');
+  });
+
+  it('carries coordinate_source through for an iryojoho-sourced facility (M13, P04名寄せで座標が得られず医療情報ネットを採用)', () => {
+    const facility = makeFacility({ match_status: 'unmatched', coordinate_source: 'iryojoho' });
+    const result = buildFacilityPoints([facility], METRICS);
+    expect(result.features[0].properties.coordinate_source).toBe('iryojoho');
+    // 座標の有無はmatch_statusでは判定しない（罠36）: unmatchedでも座標を持てば地図に出る。
+    expect(result.features).toHaveLength(1);
+  });
+
+  it('omits coordinate_source (does not invent "ksj_p04") if a facility has coordinates but no coordinate_source (defensive)', () => {
+    // 原典（ここではFacility.coordinate_source）が言っていない値を決め打ちで
+    // 発明しない（CLAUDE.md「公表物が言っていない年を出力に足さない」と同じ規律）。
+    // beds_totalが未観測時にキー自体を省略するのと同じ扱いにする。
+    const facility = makeFacility();
+    delete (facility as Partial<Facility>).coordinate_source;
+    const result = buildFacilityPoints([facility], METRICS);
+    expect('coordinate_source' in result.features[0].properties).toBe(false);
   });
 
   it('omits beds_total (not 0) when the metric is not observed', () => {

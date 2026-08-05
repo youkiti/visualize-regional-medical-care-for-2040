@@ -63,7 +63,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | iryojoho/02-1_clinic_facility_info_20250601.zip | 診療所（施設票）75,254件・同上。コミット済み |
 | iryojoho/001306376.xlsx | 公式のオープンデータ定義書（列の意味の一次資料）。コミット済み |
 
-**用途は監査（既に付与済みの座標の検算）に限る。このデータから座標を採ってはいない**（`tools/build_facility_geo_audit.py`）。座標源として統合するかは未決で、判断と根拠は `doc/DECISION_FACILITY_COORDINATES.md` にある。
+**用途は2つある**（M13、2026-08-05）: (1) 監査（既に付与済みの座標の検算、`tools/build_facility_geo_audit.py`）。(2) P04で位置が定まらなかった施設への座標源としての補完的採用（`tools/build_web_facilities.py`。名称・都道府県・市区町村・一意性を複合で確認できた758件のみ）。監査スクリプト自体は今も `facility_geo_linkage.csv` を書き換えず座標を採用しない（採用は下流の表示用データセット生成で行う）。判断と根拠は `doc/DECISION_FACILITY_COORDINATES.md` にある。
 
 - 各zipはCSV1本（**UTF-8 BOM付き**・65列）。P04に無い **`所在地座標（緯度）`・`（経度）`**（列11・12）・**`都道府県コード`・`市区町村コード`**（列8・9）・**都道府県名から始まる完全な住所**（列10）・**病床の種別内訳**（列58〜65）を持つ。P04で必要だった点-多角形判定による同名市区町村の切り分けが要らない。
 - **座標のセンチネルは `0.0`/`0.0`**（実測4,456件・5.4%）。列自体は全行埋まって見えるので、**空欄判定では検出できない**。日本の緯度経度の範囲内かで判定すること。市立札幌病院のような大病院も該当する。
@@ -82,7 +82,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `area_map.json` | 境界GeoJSON + フラット化した指標プロパティ（約4.9MB）。**`?url` インポートでファイルURLのみをバンドルに含め、MapLibreにfetchさせる**（メインスレッドでパースしない）。需要は `<区分>_<年>`（値）と `<区分>_r_<年>`（2024年度比）の24プロパティ、年度間比較は分母0の機能を除いたプロパティを持つ |
 | `area_index.json` | 選択・bbox解決用の軽量インデックス（`area_code`・`boundary_source`・bboxのみ）。**バンドルに取り込み**、地図の表示状態に依存せず区域選択を解決する |
 | `facility_summary.json` | 医療機関の区域別件数＋21指標の定義＋`value_status` のラベル＋出典（約38KB）。**バンドルに取り込み**、shard取得前でも件数を出せるようにし、出典欄と指標ラベルの正本にする |
-| `public/facilities/<区域コード>.json` × 339 | 区域ごとの医療機関の全データ（21指標＋機能＋座標）。**バンドルせず、区域を選んだときに1本だけfetchする**（合計6.8MB・gzipで中央値2.2KB／最大24KB） |
+| `public/facilities/<区域コード>.json` × 339 | 区域ごとの医療機関の全データ（21指標＋機能＋座標）。座標源は2系統（P04名寄せ／医療情報ネット、`coordinate_source`で区別。M13）。**バンドルせず、区域を選んだときに1本だけfetchする**（合計6.8MB・gzipで中央値2.2KB／最大24KB） |
 | `public/flow/area_flow.json` | 患者の流入出の正本の忠実コピー（約499KB・gzip約126KB）。**バンドルせず、区域を初めて選んだときに1回だけfetchして以後は使い回す**。339分割していないのは、全体で1本しかなく取得先が選択に依存しないため（罠14の競合が原理的に起きない） |
 | `public/downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip` | 加工済みCSV17本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv`（計36エントリ・約3.4MB）。**バンドルせず、リンクからブラウザに直接ダウンロードさせる** |
 | `public/downloads/area_boundaries_R7.geojson` | 正本の忠実コピー（単体利用向け。ZIPには入れない） |
@@ -259,6 +259,8 @@ npm run typecheck  # tsc --noEmit のみ
 35. **配布物の名前に年度を入れたら、中身が変わったときに改名する**（M9）: 一括DL ZIP が `..._R7.zip` のままR6の行を含むと、名前が中身と食い違う。`BUNDLE_ROOT`/`BUNDLE_FILE_NAME` の1箇所を直せば `sync-data.mjs`・`download_manifest.json` は追随するが、`downloadAssets.test.ts` のリテラルと各ドキュメントの本数記述は手で直す必要がある。
 36. **座標の有無を `match_status` から導かない**（M10）: 名寄せで座標が付いた（`match_status==='matched'`）施設でも、**検算で否定されて座標を出さない**ものが76件ある（`coordinate_withdrawn`）。`match_status !== 'matched'` を「座標なし」の判定に使っている箇所は静かに壊れる（バッジの文言・地図の点・カバレッジ計算）。**`coordinates` の有無で判定する**こと。実際に `FacilityList.tsx`・`facilityPoints.ts`・`sync-data.mjs` の3箇所を直した。
 37. **正本CSVを書き換えず、下流で「出さない」ようにする**（M10）: 検算で否定された座標を `facility_geo_linkage.csv` から消すと、(a) 監査が linkage を読み linkage が監査を読む循環依存になり、(b)「P04名寄せの結果」という正本の意味が壊れる。**正本は名寄せの結果のまま保ち、取り下げは表示用データセット側（`build_web_facilities.py`）で行う**。`match_status` も書き換えない。値の補正と表示の抑制は別物で、前者だけが要件§4.3の改定を要する。
+38. **表示用JSONの不変条件は Python 側（`tools/build_web_*.py`）と web 側（`web/scripts/sync-data.mjs`）の両方に独立して書かれている**（M13）: 片方だけ直すと `pytest` は通るのに `npm run build`（`prebuild` が `sync-data` を呼ぶ）だけが落ちる。M13で実際に踏んだ: `sync-data.mjs` が「`coordinates` を持つ施設は必ず `match_status==='matched'`」を検証していたため、座標源が2系統（P04名寄せ＋医療情報ネット）になった瞬間に落ちた。**表示用データセットの形を変えたら、必ず両方の検証を洗うこと。**
+39. **出典側の事実（参照時点・データ名など）を画面コンポーネントに直書きしない**（M13）: metadata から引くこと。M13で医療情報ネットの参照時点（2025-06-01）をバッジとツールチップに直書きしかけた。CSV側は metadata 由来だったので、画面だけが将来静かに嘘になるところだった（M11の「preamble側の文言は `known_issues` から引き、ハードコードしない」と同じ規律）。
 
 ## ドキュメント
 
@@ -358,7 +360,7 @@ npm run typecheck  # tsc --noEmit のみ
 - 加工済みCSV一括ZIPは16本→**17本**（36エントリ）になった
 - 実装で判明した罠は「可視化実装で判明した罠」節の36〜37に記録
 
-**保留**: 医療情報ネットの公表座標を座標源として統合すること（要件 §4.3 の改定を伴う。判断材料・満たすべき条件・越えてはならない一線・再検討条件はすべて `doc/DECISION_FACILITY_COORDINATES.md` にある）。
+**「保留」だった医療情報ネットの公表座標を座標源として統合することは、2026-08-05（M13）にGoと決定し実施済み**（要件 §4.3 を改定した。決定の経緯・満たすべき条件との対応・越えてはならない一線・確定した数字はすべて `doc/DECISION_FACILITY_COORDINATES.md` にある）。
 
 **M12「都道府県層の年度間比較（R6→R7）」完了**: 表示単位トグルが全指標で成立するようになった（それまで都道府県表示中にyoy指標を選ぶと地図が全県「算出不可」のグレーになり、凡例だけ7色スケールを出していた）。新しい生データは使わず、コミット済みCSVだけから作る。
 - ビルダ `tools/build_web_prefecture_yoy.py` → `data/processed/prefecture_yoy_R6_R7.json`（47都道府県＋`national`・約47KB）。入力は `prefecture_beds.csv`（R6見込量2025・R6実績2024・R7実績2025）・`prefecture_bed_report_rate.csv`・`prefecture_boundaries_R7.geojson`（pref_code検証のみ）。検証10項目
@@ -366,3 +368,12 @@ npm run typecheck  # tsc --noEmit のみ
 - **非欠陥を `known_issues` に入れない**: 上記(a)は「問題」ではないので、画面の「データの既知の問題」欄に出さず `processing.caveat` と `fields` に書く。`known_issues` は入力CSVのmeta.jsonから引き継ぐだけにしている
 - 地図は `merge.mjs` の `buildPrefectureMap` に `y_*` を足すだけで動く（**プロパティ名・分母0のときキーごと省く規約とも区域層と同一**なので、MapView・Legend・metrics.ts は無変更）。`buildPrefectureMap` は「指標データセットと年度間比較データセットの `actual_2025` が全都道府県×5機能で一致すること」も検証する（ツールチップが分子を指標側・分母を比較側から読むため、ずれると表示だけが静かに食い違う）
 - 都道府県パネルに年度間比較テーブル（区域パネルと同じ列構成）・報告率2年ぶん・注記、`SourceNotes` に出典ブロック、CSV2本（`buildPrefectureTableCsv` の yoy 分岐・`buildPrefectureDetailCsv` の `dataset=yoy` 行）を追加。M11でボタンを無効化していた「都道府県×年度間比較」の組み合わせは解除した
+
+**M13「医療機関座標の統合（医療情報ネット、決定2のGo）」完了**: `doc/DECISION_FACILITY_COORDINATES.md` の決定2（保留）をユーザーがGoとし、要件 `doc/REQUIREMENTS.md` §4.3 を改定した。
+- **新しい正本CSVも新しいツールも作っていない**（加工済みCSVは17本のまま）。**M10で座標の取り下げを表示用データセット側で行った前例と対称に、採用も `tools/build_web_facilities.py`（表示用データセットの生成）で行う**。正本 `facility_geo_linkage.csv`（P04名寄せの結果）・`facility_geo_audit.csv`（監査結果）はいずれも書き換えない
+- 採用条件は決定2に事前登録済みの「名称の正規化完全一致・都道府県・市区町村・一意性を複合で確認し、一つでも欠ければ採用しない」。P04名寄せで座標が付かなかった1,516件のうち、`facility_geo_audit.csv` の `reference_status=='unique'` な**758件**を採用し、`coordinate_source='iryojoho'` として `area_facilities_R7.json` に出力する。地図に出る座標は 10,168（P04由来）+758=**10,926件（11,760件中92.9%）**
+- 採用しなかったのは、原典の所在地欄が空で市区町村を検証できない72件（`unique_municipality_unverified`）と、一意に同定できない686件（`none`/`municipality_mismatch`/`ambiguous`）。決定2が事前に見積もっていた94.2%との差（148件=76+72）は、検算で否定された76件（決定3）と、この72件による
+- 採用した758件のうち12件は参照座標の点-多角形判定が原典の記載区域と食い違う（観測事実として記録、棄却理由にはしない。詳細は `doc/DECISION_FACILITY_COORDINATES.md`「決定2の実施」節(e)）
+- **検算で否定された76件（決定3）は結論を維持しつつ理由が変わった**: 元の理由「参照側の座標を採用することは保留中の統合に当たる」は決定2のGoで失効し、新しい理由は「2つの公表物が食い違っており、どちらが正しいか公表物からは決められないため」（ユーザーの判断）。値は補正せず、引き続き座標を出さない
+- **地図の点は座標源で描き分けない**（原典に無い「質の違い」を示唆しないため）。座標源は `coordinate_source` として施設ごとに保持し、画面（一覧のバッジ・カバレッジ行・地図のツールチップ・出典欄）とCSVで区別できるようにした
+- 実装で判明した罠は「可視化実装で判明した罠」節の38〜39に記録

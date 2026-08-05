@@ -72,6 +72,11 @@ export default function SourceNotes({
   // merged into the same JSX as source.
   const facilitySource = facilityMetadata.source;
   const geoLinkageSource = facilityMetadata.geo_linkage_source;
+  // geo_audit_sourceは付与済み座標の検算(医療情報ネットとの比較)由来の出典ブロック
+  // (M13)。source/geo_linkage_sourceのどちらともキー集合が違う第3の形
+  // (license/fiscal_year/acquired_date/source_file/source_sha256を持たない)ため、
+  // 同じdlを使い回さない(下記参照、CLAUDE.md罠11)。
+  const geoAuditSource = facilityMetadata.geo_audit_source;
   const facilityCaveat = facilityMetadata.processing.caveat;
   // 都道府県(概観レイヤ)のmetadataは `source` が無く、source_beds/source_demand の
   // 2ブロックに分かれている。caveatも3キー(beds/demand_forecast/demand_population)で、
@@ -193,6 +198,18 @@ export default function SourceNotes({
         <strong>座標（国土数値情報P04との名寄せ）について: </strong>
         {facilityCaveat.facility_geo_linkage}
       </p>
+      {/* facility_geo_auditはM10（検算のみ）から積み残していた注記。M13で
+          医療情報ネットが「検算の参照」から「座標源そのもの」に昇格したため、
+          出典欄に必須になった（他の4本のcaveatと同じ<p className="caveat">を
+          1つ足すだけ）。ラベルは検算・座標源両方の役割が分かる文言にする。 */}
+      <p className="caveat">
+        <strong>座標の検算・医療情報ネットの座標源としての採用について: </strong>
+        {facilityCaveat.facility_geo_audit}
+      </p>
+      <p className="caveat">
+        <strong>座標源の採用方針について: </strong>
+        {facilityCaveat.coordinate_adoption}
+      </p>
 
       <dl>
         <dt>データ名</dt>
@@ -237,6 +254,29 @@ export default function SourceNotes({
         </dd>
         <dt>利用規約</dt>
         <dd>{geoLinkageSource.license}</dd>
+      </dl>
+
+      {/* geo_audit_sourceはP04名寄せで座標が得られなかった施設について採用した
+          医療情報ネットの公表座標の出典(M13)。地図の点の一部(758件)がこの出典由来に
+          なったため、要件§6「すべての可視化に出典を表示」を満たすには必須。
+          license/fiscal_year/acquired_date/source_file/source_sha256を持たない
+          別の形なので、上のgeo_linkage_sourceのdlは使い回さない。inputsは
+          オブジェクトの配列で、そのまま描画するとReactが落ちる(罠11)ため描画しない
+          （個別ファイルのSHA-256はdoc/FACILITY_GEO_AUDIT.mdを参照）。 */}
+      <p>
+        <strong>座標の出典（医療情報ネットの公表座標。P04名寄せで座標が得られなかった施設のみ）</strong>
+      </p>
+      <dl>
+        <dt>データ名</dt>
+        <dd>{geoAuditSource.name}</dd>
+        <dt>掲載ページ</dt>
+        <dd>
+          <a href={geoAuditSource.page_url} target="_blank" rel="noreferrer">
+            {geoAuditSource.page_url}
+          </a>
+        </dd>
+        <dt>参照時点</dt>
+        <dd>{geoAuditSource.reference_snapshot_date}</dd>
       </dl>
 
       <KnownIssues issues={facilityMetadata.known_issues} label="データの既知の問題（医療機関）" />
