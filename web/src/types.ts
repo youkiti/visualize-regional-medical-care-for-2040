@@ -381,3 +381,129 @@ export interface DownloadManifest {
   boundaries: DownloadManifestBoundaries;
   members: DownloadManifestMember[];
 }
+
+// ---- Prefecture overview layer (prefecture_indicators_R7.json /
+// generated/prefecture_indicators.json / generated/pref_map.json) -----------
+//
+// Mirrors data/processed/prefecture_indicators_R7.json
+// (tools/build_web_prefecture.py). Deliberately NOT reusing AreaIndicators*/
+// AreaDemand* above — this dataset's metadata has yet another shape (CLAUDE.md
+// 「可視化実装で判明した罠」11):
+//   - TWO source blocks, `source_beds` (R7/001722915.xlsx由来) と
+//     `source_demand` (R7/001728462.xlsx由来)。`source` という単一キーは無い
+//   - `processing.caveat` は3キー（beds/demand_forecast/demand_population）。
+//     AreaIndicators側は単一文字列、AreaDemand側は2キー、Facility側は4キーで、
+//     どれとも違う
+//   - 病床と需要が1つのオブジェクトに同居する（区域側は2ファイルに分かれている）
+//
+// 値の由来の差も型コメントとして残す: 病床は厚労省の都道府県別公表値そのもの、
+// 需要と人口(population_2024/2040)は構想区域から本リポジトリが合計した派生値
+// （known_issues の prefecture_demand_aggregated_by_this_repository）。
+
+export interface PrefectureBeds {
+  actual_2025: number;
+  need_2025: number;
+}
+
+/** 1都道府県（または全国）ぶんの指標。national と prefectures[] で同じ形。 */
+export interface PrefectureIndicator {
+  /** ゼロ埋め2桁。全国は '00'（national のみ）。 */
+  pref_code: string;
+  pref_name: string;
+  /** その都道府県に属する構想区域の数（全国は339）。 */
+  area_count: number;
+  population_2020: number;
+  area_km2: number;
+  /** 医療需要推計の基準人口。**構想区域の合計（派生値）**。 */
+  population_2024: number;
+  /** 2040年人口。**構想区域の合計（派生値）**。 */
+  population_2040: number;
+  /** 厚労省の都道府県別公表値そのもの（構想区域の合計と完全一致することを検証済み）。 */
+  beds: Record<BedFunctionKey, PrefectureBeds>;
+  /** category -> { year（文字列キー） -> レセプト件数/月 }。**構想区域の合計（派生値）**。 */
+  demand: Record<DemandCategoryKey, Record<string, number>>;
+}
+
+/** 病床側（R7/001722915.xlsx由来）と需要側（R7/001728462.xlsx由来）で同じキー集合を持つ出典ブロック。 */
+export interface PrefectureSource {
+  name: string;
+  publisher: string;
+  url: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  source_sheet: string;
+  acquired_date: string;
+  license: string;
+  original_title: string;
+  original_notes: string[];
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+export interface PrefectureProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 3キー。病床側2CSVは注記が同一なので beds 1本にまとめてある。 */
+  caveat: { beds: string; demand_forecast: string; demand_population: string };
+}
+
+export interface PrefectureIndicatorsMetadata {
+  title: string;
+  /** `source` ではなく2ブロックに分かれている（上のコメント参照）。 */
+  source_beds: PrefectureSource;
+  source_demand: PrefectureSource;
+  processing: PrefectureProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface PrefectureIndicatorsData {
+  metadata: PrefectureIndicatorsMetadata;
+  functions: BedFunctionKey[];
+  function_labels: Record<BedFunctionKey, string>;
+  categories: DemandCategoryKey[];
+  category_labels: Record<DemandCategoryKey, string>;
+  years: number[];
+  year_labels: Record<string, string>;
+  baseline_year: number;
+  /** 全国（pref_code='00'）。境界を持たないため prefectures[] とは分けられている。 */
+  national: PrefectureIndicator;
+  /** 47都道府県（pref_codeの昇順）。全国は含まない。 */
+  prefectures: PrefectureIndicator[];
+}
+
+/**
+ * Flat properties of a single feature in generated/pref_map.json.
+ * a_/n_/r_<機能> と需要のキーは area_map.json と同名（web/src/lib/metrics.ts の
+ * readMetricValue/readDemandValue がどちらの層でもそのまま使える）。区域固有の
+ * area_code/area_name は持たない。
+ */
+export interface PrefectureMapFeatureProperties {
+  pref_code: string;
+  pref_name: string;
+  boundary_source: string;
+  a_total: number;
+  n_total: number;
+  r_total?: number;
+  a_high_acute: number;
+  n_high_acute: number;
+  r_high_acute?: number;
+  a_acute: number;
+  n_acute: number;
+  r_acute?: number;
+  a_recovery: number;
+  n_recovery: number;
+  r_recovery?: number;
+  a_chronic: number;
+  n_chronic: number;
+  r_chronic?: number;
+  bb_w: number;
+  bb_s: number;
+  bb_e: number;
+  bb_n: number;
+}
+
+/** 地図の表示単位。'area'=339構想区域（主表示）、'pref'=47都道府県（概観）。 */
+export type MapLevel = 'pref' | 'area';

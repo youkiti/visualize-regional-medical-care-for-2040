@@ -55,7 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV13本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/prefecture_indicators_R7.json`（`tools/build_web_prefecture.py` が生成、47都道府県+全国の病床と需要）・`data/processed/prefecture_boundaries_R7.geojson`（`tools/build_prefecture_boundaries.py` が生成、47都道府県）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV13本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
@@ -68,6 +68,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `public/downloads/chiiki-iryo-koso_processed-csv_R7.zip` | 加工済みCSV13本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv`（計28エントリ・約2.3MB）。**バンドルせず、リンクからブラウザに直接ダウンロードさせる** |
 | `public/downloads/area_boundaries_R7.geojson` | 正本の忠実コピー（単体利用向け。ZIPには入れない） |
 | `src/generated/download_manifest.json` | ZIP/GeoJSONのサイズ・SHA-256・収録CSV一覧（約3.9KB）。**バンドルに取り込み**、一括DLセクションの表示に使う |
+| `prefecture_indicators.json` | 都道府県（概観レイヤ）の正本の忠実コピー（約75KB）。**バンドルに取り込み**、都道府県パネル・分位計算・出典表示に使う |
+| `pref_map.json` | 都道府県境界 + フラット化した指標プロパティ（約2.5MB・gzip650KB）。`area_map.json` と同じく**`?url` インポートでMapLibreにfetchさせる**。プロパティ名も `a_/n_/r_<機能>`・`<区分>_<年>` と区域側と同一 |
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
 
@@ -144,10 +146,14 @@ PYTHONIOENCODING=utf-8 python tools/build_facility_geo_linkage.py
 PYTHONIOENCODING=utf-8 python tools/build_iryoken2_geojson.py    # → iryoken2_A38-20.geojson（335二次医療圏）
 PYTHONIOENCODING=utf-8 python tools/build_area_boundaries.py     # → area_boundaries_R7.geojson（339構想区域・可視化用）
 
+# 都道府県境界（要 Node.js のみ。入力は上記のコミット済みGeoJSONなのでksj/A38-20は不要）
+PYTHONIOENCODING=utf-8 python tools/build_prefecture_boundaries.py  # → prefecture_boundaries_R7.geojson（47都道府県）
+
 # 可視化サイト向け表示用データセット（→ area_indicators_R7.json）
 PYTHONIOENCODING=utf-8 python tools/build_web_data.py
 PYTHONIOENCODING=utf-8 python tools/build_web_demand.py      # → area_demand_R7.json（医療需要推計）
 PYTHONIOENCODING=utf-8 python tools/build_web_facilities.py  # → area_facilities_R7.json（医療機関×21指標）
+PYTHONIOENCODING=utf-8 python tools/build_web_prefecture.py  # → prefecture_indicators_R7.json（都道府県。要 prefecture_boundaries_R7.geojson）
 
 # テスト
 pytest
@@ -196,6 +202,9 @@ npm run typecheck  # tsc --noEmit のみ
 20. **公表物が言っていない年を出力に足さない**（M6）: 推計流出/流入患者割合には原典もmeta.jsonも対象年を書いていないので、CSVの `year` 列は空欄にする（基準人口の年の不一致と同じ理由。断定すると公表物にない主張になる）。
 21. **自前のZIPは書きっぱなしにしない**（M6）: 依存を増やさないため `node:zlib` だけでZIPを組み立てているが、書いた直後に読み直して全エントリが元データとバイト一致することを検証する。決定性のためタイムスタンプは固定値にする（生成日時を入れると同じ入力でもバイトが変わる）。
 22. **幅360pxのパネルに4列テーブルを `width: 100%` で押し込むと列が潰れる**（M6）: 「内容」列が1〜3文字ずつ折り返して読めなくなる。`width: max-content; min-width: 100%` にして、はみ出しは `overflow-x: auto` のラッパへ逃がす（罠15と同じく、実機で見るまで分からない）。
+23. **上位階層の境界は、原典から作り直さず下位階層の境界をディゾルブして作る**（M8）: 都道府県境界を `ksj/A38-20` から都道府県単位で作り直すと、簡略化（Visvalingam）の挙動が入力ポリゴンの粒度に依存するため、同じ海岸線が構想区域レイヤと微妙に食い違う。区域の塗りの上に県境を重ねる描き方では、これが「県境が海へはみ出す／内陸へ食い込む」という**目に見える破綻**になる。コミット済みの `area_boundaries_R7.geojson` を `pref_code` でディゾルブすれば、県境は必ず区域境界の部分集合になり、しかも入力がGit管理下なので `ksj/A38-20`（1.13GB・Git管理外）に依存せず再生成できる。面積は全国合計・県別とも実測差 0.0000%（＝純粋な集合演算）。
+24. **階層を増やしたら分位・凡例の文言・ホバー状態を階層ごとに分ける**（M8）: (a) 分位（`actual`/`need`）は47都道府県と339区域で別物なので、母集団を level で切り替えないと凡例の区分が実データの分布から外れる。(b) 凡例・注記の「区域」という語と件数（「339区域の…」）は都道府県表示では嘘になる。(c) **表示単位の切替はボタン操作なのでカーソルは地図の外にあり、`mousemove` が追加発火しない**ため、切替時に明示的に `setHover(null)` とホバー輪郭フィルタの解除をしないと、前の階層のツールチップだけが残る（罠16の親戚）。
+25. **層をまたぐ値は「公表値」と「本リポジトリの集計値」を混ぜない**（M8）: 病床は厚労省が都道府県別を公表している（001722915.xlsx）が、医療需要（001728462.xlsx）は構想区域単位しか無い。同じパネルに並ぶ2つの表が、一方は公表値・もう一方は派生値になる。**派生であることは `known_issues` に構造化して記録し**（`prefecture_demand_aggregated_by_this_repository`）、値の真横にも注記を置く。合計は必ず**ソート済みの順序**で足すこと（集合やdictのイテレーション順に依存すると浮動小数点の末尾ビットが揺れ、バイト一致の再現性テストが壊れる）。
 
 ## ドキュメント
 
@@ -251,4 +260,13 @@ npm run typecheck  # tsc --noEmit のみ
 - **②加工済みデータ一括DL**: `web/scripts/sync-data.mjs` が `data/processed/` の加工済みCSV13本＋各`.meta.json`をZIP化し `web/public/downloads/chiiki-iryo-koso_processed-csv_R7.zip`（28エントリ・約2.3MB）として書き出す。ZIP本体の組み立ては依存ゼロの自前実装（`web/scripts/lib/zip.mjs`）、MANIFEST.tsv・README.mdの内容は `web/scripts/lib/bundle.mjs`。`web/public/downloads/area_boundaries_R7.geojson`（正本の単体コピー）も同時に書き出す。画面側は `BulkDownload.tsx` が `download_manifest.json` を表示するだけで、ZIP自体はブラウザの通常のダウンロードに任せる
 - 実装で判明した罠は「可視化実装で判明した罠」節の17〜22に記録
 
-**未実装**: 流入流出（001723366）のパーサ。
+**M8「都道府県階層（概観レイヤ）」完了**: 要件 `doc/REQUIREMENTS.md` §3.1 の3階層のうち未着手だった都道府県層を実装した。
+- 境界 `tools/build_prefecture_boundaries.py` → `data/processed/prefecture_boundaries_R7.geojson`（47都道府県・約2.4MB）。**コミット済みの `area_boundaries_R7.geojson` を `pref_code` でディゾルブする**ので、`ksj/A38-20`（Git管理外）に依存せず再生成でき、県境が必ず区域境界の部分集合になる（罠23）。検証5項目、面積の実測差は全国合計・県別とも 0.0000%
+- 表示用データセット `tools/build_web_prefecture.py` → `data/processed/prefecture_indicators_R7.json`（47都道府県＋`national`・約75KB）。検証13項目のうち中心は**検証8「都道府県の2025年病床が構想区域(area_beds.csv)の合計と完全一致する」**（470キー全一致）と**検証9「全国＝47都道府県の合計」**。厚労省の別々の公表ファイル（001722915.xlsx と 001723349.xlsx）の内部整合の確認でもあり、概観層と主表示層で数字が食い違わないことの担保
+- **病床は厚労省の都道府県別公表値そのもの／医療需要と基準人口は構想区域からの集計（派生値）**。派生であることは `known_issues` の `prefecture_demand_aggregated_by_this_repository` に記録し、パネルの注記・凡例・出典欄へ自動で流している（罠25）
+- `web/` に表示単位トグル（都道府県／構想区域）を追加。**構想区域表示中は県境を線で重ねる**（同じ `pref_map.json` を線レイヤとしてだけ使う）。都道府県パネルは病床5機能・需要2区分×6年度・全国（参考、折りたたみ）と「この県の構想区域を見る」ドリルダウン（区域へ切り替えて県のbboxへズーム）を持つ
+- 全国は境界を持たない（47都道府県の和集合を描いても情報が増えないため）。`prefectures` 配列とは別の `national` キーに置き、都道府県を選んだときの参考値としてのみ表示する
+- 分位・凡例の文言・ホバー状態は階層ごとに分ける（罠24）。配色（発散7色・固定境界）は区域層と共通なので、層を切り替えても同じ色は同じ比を意味する
+- 実装で判明した罠は「可視化実装で判明した罠」節の23〜25に記録
+
+**未実装**: 流入流出（001723366）のパーサ。都道府県ぶんの絞り込みCSV（M6の `buildAreaTableCsv` は常に339構想区域を出す。都道府県表示中はボタンのラベルでその旨を示している）。

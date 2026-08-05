@@ -13,6 +13,9 @@
 //                                                lookup, used by App to resolve area
 //                                                selection independent of the map's
 //                                                load/viewport state (see App.tsx)
+//   web/src/generated/prefecture_indicators.json — verbatim copy (overview layer)
+//   web/src/generated/pref_map.json           — 47 prefecture boundaries + the same flat
+//                                                indicator/demand props as area_map.json
 //   web/src/generated/facility_summary.json   — bundled, lightweight (no facilities[])
 //                                                summary of area_facilities_R7.json
 //   web/public/facilities/<area_code>.json    — per-area facility shard (339 files),
@@ -38,7 +41,14 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
-import { buildAreaMap, buildAreaIndex, demandValueKey, demandRatioKey, BED_FUNCTIONS } from './lib/merge.mjs';
+import {
+  buildAreaMap,
+  buildAreaIndex,
+  buildPrefectureMap,
+  demandValueKey,
+  demandRatioKey,
+  BED_FUNCTIONS,
+} from './lib/merge.mjs';
 import { buildAreaShard, buildFacilitySummary, shardFileName } from './lib/facilities.mjs';
 import { createZip, readZip } from './lib/zip.mjs';
 import { BUNDLE_ROOT, BUNDLE_FILE_NAME, BUNDLE_CSV_FILES, buildManifestTsv, buildBundleReadme } from './lib/bundle.mjs';
@@ -52,6 +62,8 @@ const indicatorsPath = path.join(repoRoot, 'data', 'processed', 'area_indicators
 const demandPath = path.join(repoRoot, 'data', 'processed', 'area_demand_R7.json');
 const boundariesPath = path.join(repoRoot, 'data', 'processed', 'area_boundaries_R7.geojson');
 const facilitiesPath = path.join(repoRoot, 'data', 'processed', 'area_facilities_R7.json');
+const prefIndicatorsPath = path.join(repoRoot, 'data', 'processed', 'prefecture_indicators_R7.json');
+const prefBoundariesPath = path.join(repoRoot, 'data', 'processed', 'prefecture_boundaries_R7.geojson');
 const processedDir = path.join(repoRoot, 'data', 'processed');
 const generatedDir = path.join(webDir, 'src', 'generated');
 const facilitiesOutDir = path.join(webDir, 'public', 'facilities');
@@ -61,6 +73,7 @@ const downloadsOutDir = path.join(webDir, 'public', 'downloads');
 const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for-2040';
 
 const EXPECTED_FEATURE_COUNT = 339;
+const EXPECTED_PREFECTURE_COUNT = 47;
 const EXPECTED_FACILITY_TOTAL = 11760;
 const EXPECTED_GEOCODED_TOTAL = 10244;
 
@@ -126,6 +139,8 @@ function main() {
   const demand = readJson(demandPath, 'area_demand_R7.json');
   const boundaries = readJson(boundariesPath, 'area_boundaries_R7.geojson');
   const facilitiesData = readJson(facilitiesPath, 'area_facilities_R7.json');
+  const prefIndicators = readJson(prefIndicatorsPath, 'prefecture_indicators_R7.json');
+  const prefBoundaries = readJson(prefBoundariesPath, 'prefecture_boundaries_R7.geojson');
 
   const features = boundaries.data.features;
   if (!Array.isArray(features) || features.length !== EXPECTED_FEATURE_COUNT) {
@@ -380,6 +395,115 @@ function main() {
     }
   }
 
+  // --- prefecture (overview layer) validation ---------------------------
+  // 都道府県レイヤは構想区域レイヤと同じ形の検証をかける。ここが黙って
+  // 通ると「概観層と主表示層で数字が食い違う」という最も分かりにくい事故に
+  // なるため、値そのものの整合(都道府県=構想区域の合計)は
+  // tools/build_web_prefecture.py の検証8・9で既に担保してある。
+  const prefFeatures = prefBoundaries.data.features;
+  if (!Array.isArray(prefFeatures) || prefFeatures.length !== EXPECTED_PREFECTURE_COUNT) {
+    fail(
+      `prefecture_boundaries_R7.geojson feature count must be exactly ${EXPECTED_PREFECTURE_COUNT}, got ${
+        Array.isArray(prefFeatures) ? prefFeatures.length : typeof prefFeatures
+      }`
+    );
+  }
+
+  const prefBoundaryCodes = prefFeatures.map((f) => f.properties.pref_code);
+  const prefBoundaryCodeSet = new Set(prefBoundaryCodes);
+  if (prefBoundaryCodeSet.size !== prefBoundaryCodes.length) {
+    fail('duplicate pref_code found among prefecture boundary features');
+  }
+
+  const prefectures = prefIndicators.data.prefectures;
+  if (!Array.isArray(prefectures) || prefectures.length !== EXPECTED_PREFECTURE_COUNT) {
+    fail(
+      `prefecture_indicators_R7.json: "prefectures" must have exactly ${EXPECTED_PREFECTURE_COUNT} entries, got ${
+        Array.isArray(prefectures) ? prefectures.length : typeof prefectures
+      }`
+    );
+  }
+  if (!prefIndicators.data.national || prefIndicators.data.national.pref_code !== '00') {
+    fail('prefecture_indicators_R7.json: "national" is missing or is not pref_code "00"');
+  }
+
+  const prefIndicatorCodeSet = new Set(prefectures.map((p) => p.pref_code));
+  const prefMissingInIndicators = [...prefBoundaryCodeSet].filter((c) => !prefIndicatorCodeSet.has(c));
+  const prefMissingInBoundaries = [...prefIndicatorCodeSet].filter((c) => !prefBoundaryCodeSet.has(c));
+  if (prefMissingInIndicators.length > 0 || prefMissingInBoundaries.length > 0) {
+    fail(
+      'pref_code sets differ between prefecture boundaries and indicators. ' +
+        `missing_in_indicators=${JSON.stringify(prefMissingInIndicators)} ` +
+        `missing_in_boundaries=${JSON.stringify(prefMissingInBoundaries)}`
+    );
+  }
+
+  // 構想区域側の pref_code(area_map の上2桁ではなく boundaries の属性)と
+  // 都道府県レイヤが覆う範囲が一致すること。片方だけ区域が増減したら気付ける。
+  const areaPrefCodeSet = new Set(features.map((f) => f.properties.pref_code));
+  const prefMissingVsAreas = [...areaPrefCodeSet].filter((c) => !prefBoundaryCodeSet.has(c));
+  const areasMissingVsPref = [...prefBoundaryCodeSet].filter((c) => !areaPrefCodeSet.has(c));
+  if (prefMissingVsAreas.length > 0 || areasMissingVsPref.length > 0) {
+    fail(
+      'pref_code sets differ between prefecture boundaries and area boundaries. ' +
+        `missing_in_prefectures=${JSON.stringify(prefMissingVsAreas)} ` +
+        `missing_in_areas=${JSON.stringify(areasMissingVsPref)}`
+    );
+  }
+
+  // 需要の区分・年度が構想区域側と同一であること(片方だけ年度が増えると、
+  // 地図のプロパティキーが層によって食い違って静かに無色になる)。
+  if (JSON.stringify(prefIndicators.data.categories) !== JSON.stringify(demandCategories)) {
+    fail(
+      'prefecture_indicators_R7.json categories differ from area_demand_R7.json: ' +
+        `${JSON.stringify(prefIndicators.data.categories)} vs ${JSON.stringify(demandCategories)}`
+    );
+  }
+  if (JSON.stringify(prefIndicators.data.years) !== JSON.stringify(demandYears)) {
+    fail(
+      'prefecture_indicators_R7.json years differ from area_demand_R7.json: ' +
+        `${JSON.stringify(prefIndicators.data.years)} vs ${JSON.stringify(demandYears)}`
+    );
+  }
+  if (prefIndicators.data.baseline_year !== demand.data.baseline_year) {
+    fail(
+      'prefecture_indicators_R7.json baseline_year differs from area_demand_R7.json: ' +
+        `${prefIndicators.data.baseline_year} vs ${demand.data.baseline_year}`
+    );
+  }
+
+  let prefMap;
+  try {
+    prefMap = buildPrefectureMap(prefBoundaries.data, prefIndicators.data);
+  } catch (err) {
+    fail(`buildPrefectureMap failed: ${err.message}`);
+    return; // unreachable
+  }
+
+  for (const feature of prefMap.features) {
+    const props = feature.properties;
+    for (const fn of BED_FUNCTIONS) {
+      if (typeof props[`a_${fn}`] !== 'number' || typeof props[`n_${fn}`] !== 'number') {
+        fail(`prefecture feature ${props.pref_code} is missing a_${fn}/n_${fn}`);
+      }
+    }
+    for (const key of ['bb_w', 'bb_s', 'bb_e', 'bb_n']) {
+      if (!Number.isFinite(props[key])) {
+        fail(`prefecture feature ${props.pref_code} has a non-finite ${key}: ${props[key]}`);
+      }
+    }
+    for (const category of demandCategories) {
+      for (const year of demandYears) {
+        for (const key of [demandValueKey(category, year), demandRatioKey(category, year)]) {
+          if (typeof props[key] !== 'number' || !Number.isFinite(props[key])) {
+            fail(`prefecture feature ${props.pref_code} has a non-finite ${key}: ${props[key]}`);
+          }
+        }
+      }
+    }
+  }
+  // --- end prefecture validation ----------------------------------------
+
   fs.mkdirSync(generatedDir, { recursive: true });
 
   // 1. area_indicators.json — verbatim copy of the source (line-ending
@@ -406,6 +530,18 @@ function main() {
   //    lookup table, bundled directly (not fetched) so App can resolve area
   //    selection without depending on the map's load/viewport state.
   fs.writeFileSync(path.join(generatedDir, 'area_index.json'), `${JSON.stringify(areaIndex)}\n`);
+
+  // 3b. prefecture_indicators.json — verbatim copy (same treatment as
+  //     area_indicators.json): 47都道府県+全国ぶんで75KBしかないので、区域側と
+  //     同じくバンドルしてパネル・分位計算・出典表示に使う。
+  fs.writeFileSync(
+    path.join(generatedDir, 'prefecture_indicators.json'),
+    prefIndicators.raw.replace(/\r\n/g, '\n')
+  );
+
+  // 3c. pref_map.json — 概観レイヤの地図データ。area_map.json と同じく
+  //     `?url` インポートでMapLibreにfetchさせる(メインスレッドでパースしない)。
+  fs.writeFileSync(path.join(generatedDir, 'pref_map.json'), `${JSON.stringify(prefMap)}\n`);
 
   // 4. web/public/facilities/<area_code>.json — one shard per area, fetched
   //    lazily by the frontend when an area is selected. Written under
@@ -456,7 +592,9 @@ function main() {
     `[sync-data] OK: wrote area_indicators.json (${areas.length} areas), ` +
       `area_demand.json (${demandAreas.length} areas), ` +
       `area_map.json (${areaMap.features.length} features), ` +
-      `area_index.json (${areaIndex.length} entries) to ${path.relative(repoRoot, generatedDir)}; ` +
+      `area_index.json (${areaIndex.length} entries), ` +
+      `prefecture_indicators.json (${prefectures.length} prefectures + national), ` +
+      `pref_map.json (${prefMap.features.length} features) to ${path.relative(repoRoot, generatedDir)}; ` +
       `wrote ${facilityAreas.length} facility shards ` +
       `(total ${totalShardBytes.toLocaleString('en-US')} bytes, max ${maxShardBytes.toLocaleString('en-US')} bytes) ` +
       `to ${path.relative(repoRoot, facilitiesOutDir)} and facility_summary.json ` +
