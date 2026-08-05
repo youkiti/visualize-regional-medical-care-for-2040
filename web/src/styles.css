@@ -66,10 +66,24 @@ a {
   background: var(--color-panel-bg);
 }
 
-.app-header h1 {
+.app-header-top {
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 12px;
   margin: 0 0 4px 0;
+}
+
+.app-header-top h1 {
+  margin: 0;
   font-size: 1.15rem;
   font-weight: 700;
+}
+
+.app-header-repo-link {
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .app-header p {

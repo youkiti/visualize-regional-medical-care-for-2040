@@ -143,6 +143,11 @@ const FLOW_PHASE_LABELS_FALLBACK: Record<FlowPhaseKey, string> = {
 // 「流入元」「流出先」を使う（凡例タイトル例「患者の流出先の構成比」に合わせる）。
 const FLOW_ROLE_LABELS: Record<FlowDirectionKey, string> = { inflow: '流入元', outflow: '流出先' };
 
+// GitHubリポジトリのURL。web/scripts/sync-data.mjsにも同じ値がREPO_URLとして
+// あるが、あちらはnode:fs等に依存するNode側のビルドスクリプトなのでアプリの
+// バンドルからimportできない。ヘッダーのリンク先としてここに定数で持つ。
+const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for-2040';
+
 export default function App() {
   // 既定は構想区域(要件 §3.1 で「主役の表示単位」とされている方)。都道府県は
   // 概観用のレイヤとしてトグルで切り替える。
@@ -444,10 +449,20 @@ export default function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>地域医療構想 可視化（2040年に向けて）</h1>
+        <div className="app-header-top">
+          <h1>地域医療構想 可視化（2040年に向けて）</h1>
+          <a
+            className="app-header-repo-link"
+            href={REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHubリポジトリ
+          </a>
+        </div>
         <p>
           47都道府県／339構想区域ごとに、2025年病床数（実績・必要数）と、在宅（訪問診療）・外来の医療需要推計
-          （2024〜2050年度、2024年度比）を比較します。構想区域を選ぶと個別の医療機関まで辿れます。
+          （2024〜2050年度、2024年度比）を比較します。構想区域を選ぶと個別の医療機関までたどれます。
         </p>
       </header>
       <div className="app-body">
