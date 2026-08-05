@@ -2,7 +2,7 @@
 // data/processed/area_demand_R7.json,
 // data/processed/area_boundaries_R7.geojson,
 // data/processed/area_facilities_R7.json (the single source of truth,
-// owned by the Python pipeline — see CLAUDE.md) and the 13 tidy CSVs +
+// owned by the Python pipeline — see CLAUDE.md) and the 15 tidy CSVs +
 // .meta.json files under data/processed/, and writes the generated
 // artifacts the frontend bundles/fetches:
 //
@@ -23,7 +23,14 @@
 //                                                area is selected (not bundled — see the
 //                                                design note above the facility-shard
 //                                                section below)
-//   web/public/downloads/<bundle>.zip         — the 13 processed CSVs (+ their
+//   web/public/flow/area_flow.json            — verbatim copy of area_flow_R7.json
+//                                                (patient inflow/outflow rates by area ×
+//                                                phase). Fetched once when an area is
+//                                                first selected; not bundled, and (unlike
+//                                                the facility shards above) not split per
+//                                                area either — see the design note above
+//                                                the flow-data write step below for why
+//   web/public/downloads/<bundle>.zip         — the 15 processed CSVs (+ their
 //                                                .meta.json + README.md + MANIFEST.tsv)
 //                                                packed as one bulk-download archive
 //   web/public/downloads/area_boundaries_R7.geojson — verbatim copy, for standalone
@@ -62,11 +69,13 @@ const indicatorsPath = path.join(repoRoot, 'data', 'processed', 'area_indicators
 const demandPath = path.join(repoRoot, 'data', 'processed', 'area_demand_R7.json');
 const boundariesPath = path.join(repoRoot, 'data', 'processed', 'area_boundaries_R7.geojson');
 const facilitiesPath = path.join(repoRoot, 'data', 'processed', 'area_facilities_R7.json');
+const flowPath = path.join(repoRoot, 'data', 'processed', 'area_flow_R7.json');
 const prefIndicatorsPath = path.join(repoRoot, 'data', 'processed', 'prefecture_indicators_R7.json');
 const prefBoundariesPath = path.join(repoRoot, 'data', 'processed', 'prefecture_boundaries_R7.geojson');
 const processedDir = path.join(repoRoot, 'data', 'processed');
 const generatedDir = path.join(webDir, 'src', 'generated');
 const facilitiesOutDir = path.join(webDir, 'public', 'facilities');
+const flowOutDir = path.join(webDir, 'public', 'flow');
 const downloadsOutDir = path.join(webDir, 'public', 'downloads');
 
 // リポジトリの正本URL。README.md記載のURLと揃える（.git無し）。
@@ -76,6 +85,9 @@ const EXPECTED_FEATURE_COUNT = 339;
 const EXPECTED_PREFECTURE_COUNT = 47;
 const EXPECTED_FACILITY_TOTAL = 11760;
 const EXPECTED_GEOCODED_TOTAL = 10244;
+// 339区域 × directions(2) × phases(3)。area_flow_R7.json のグループ総数
+// （tools/build_web_flow.py の検証13と同じ数）。
+const EXPECTED_FLOW_GROUPS = 2034;
 
 function fail(message) {
   console.error(`[sync-data] ERROR: ${message}`);
@@ -139,6 +151,7 @@ function main() {
   const demand = readJson(demandPath, 'area_demand_R7.json');
   const boundaries = readJson(boundariesPath, 'area_boundaries_R7.geojson');
   const facilitiesData = readJson(facilitiesPath, 'area_facilities_R7.json');
+  const flowData = readJson(flowPath, 'area_flow_R7.json');
   const prefIndicators = readJson(prefIndicatorsPath, 'prefecture_indicators_R7.json');
   const prefBoundaries = readJson(prefBoundariesPath, 'prefecture_boundaries_R7.geojson');
 
@@ -331,6 +344,133 @@ function main() {
     );
   }
   // --- end area_facilities_R7.json validation ---------------------------
+
+  // --- area_flow_R7.json validation --------------------------------------
+  // area_flow_R7.json is produced by tools/build_web_flow.py, which already
+  // validates the CSVs it was built from (13 checks — see its docstring).
+  // These checks instead validate the JSON this script is about to copy
+  // verbatim into web/public/flow/area_flow.json, so a corrupted/truncated
+  // file fails the build loudly instead of shipping broken patient-flow data.
+  const flowAreas = flowData.data.areas;
+  if (!Array.isArray(flowAreas) || flowAreas.length !== EXPECTED_FEATURE_COUNT) {
+    fail(
+      `area_flow_R7.json: "areas" must have exactly ${EXPECTED_FEATURE_COUNT} entries, got ${
+        Array.isArray(flowAreas) ? flowAreas.length : typeof flowAreas
+      }`
+    );
+  }
+
+  const flowCodeSet = new Set(flowAreas.map((a) => a.area_code));
+  if (flowCodeSet.size !== flowAreas.length) {
+    fail('duplicate area_code found among area_flow_R7.json areas');
+  }
+
+  const flowMissingVsBoundaries = [...boundaryCodeSet].filter((c) => !flowCodeSet.has(c));
+  const boundariesMissingVsFlow = [...flowCodeSet].filter((c) => !boundaryCodeSet.has(c));
+  if (flowMissingVsBoundaries.length > 0 || boundariesMissingVsFlow.length > 0) {
+    fail(
+      'area_flow_R7.json area_code set differs from boundaries. ' +
+        `missing_in_flow=${JSON.stringify(flowMissingVsBoundaries)} ` +
+        `missing_in_boundaries=${JSON.stringify(boundariesMissingVsFlow)}`
+    );
+  }
+
+  const flowDirections = flowData.data.directions;
+  const flowPhases = flowData.data.phases;
+  if (!Array.isArray(flowDirections) || flowDirections.length === 0) {
+    fail('area_flow_R7.json: "directions" must be a non-empty array');
+  }
+  if (!Array.isArray(flowPhases) || flowPhases.length === 0) {
+    fail('area_flow_R7.json: "phases" must be a non-empty array');
+  }
+
+  let flowGroupCount = 0;
+  for (const area of flowAreas) {
+    for (const direction of flowDirections) {
+      const directionEntry = area.flows ? area.flows[direction] : undefined;
+      if (!directionEntry || typeof directionEntry !== 'object') {
+        fail(`area_flow_R7.json: area ${area.area_code} is missing flows.${direction}`);
+      }
+      for (const phase of flowPhases) {
+        const group = directionEntry.phases ? directionEntry.phases[phase] : undefined;
+        if (!group || typeof group !== 'object') {
+          fail(`area_flow_R7.json: area ${area.area_code} is missing flows.${direction}.phases.${phase}`);
+        }
+        flowGroupCount += 1;
+
+        const selfRateIsNull = group.self_rate === null;
+        const selfRankIsNull = group.self_rank === null;
+        if (selfRateIsNull !== selfRankIsNull) {
+          fail(
+            `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has ` +
+              `self_rate=${JSON.stringify(group.self_rate)} but self_rank=${JSON.stringify(group.self_rank)} ` +
+              '(must both be null or both be numbers)'
+          );
+        } else if (!selfRateIsNull) {
+          if (typeof group.self_rate !== 'number' || !Number.isFinite(group.self_rate)) {
+            fail(
+              `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+                `non-finite self_rate: ${group.self_rate}`
+            );
+          }
+          if (typeof group.self_rank !== 'number' || !Number.isInteger(group.self_rank)) {
+            fail(
+              `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+                `non-integer self_rank: ${group.self_rank}`
+            );
+          }
+        }
+
+        if (!Array.isArray(group.partners)) {
+          fail(
+            `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase}.partners is not an array`
+          );
+        } else {
+          for (const partner of group.partners) {
+            if (!Array.isArray(partner) || partner.length !== 2) {
+              fail(
+                `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+                  `malformed partner entry: ${JSON.stringify(partner)}`
+              );
+            }
+            const [partnerCode, rate] = partner;
+            if (typeof partnerCode !== 'string' || !boundaryCodeSet.has(partnerCode)) {
+              fail(
+                `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+                  `partner area_code not present in boundaries: ${JSON.stringify(partnerCode)}`
+              );
+            }
+            if (partnerCode === area.area_code) {
+              fail(
+                `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} lists itself ` +
+                  'as a partner (partners must exclude the area itself)'
+              );
+            }
+            if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 1) {
+              fail(
+                `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+                  `partner rate outside [0,1]: ${JSON.stringify(rate)}`
+              );
+            }
+          }
+        }
+
+        if (!Number.isInteger(group.value_error_count) || group.value_error_count < 0) {
+          fail(
+            `area_flow_R7.json: area ${area.area_code} flows.${direction}.phases.${phase} has a ` +
+              `non-negative-integer value_error_count: ${JSON.stringify(group.value_error_count)}`
+          );
+        }
+      }
+    }
+  }
+
+  if (flowGroupCount !== EXPECTED_FLOW_GROUPS) {
+    fail(
+      `area_flow_R7.json: expected ${EXPECTED_FLOW_GROUPS} direction×phase groups across all areas, got ${flowGroupCount}`
+    );
+  }
+  // --- end area_flow_R7.json validation -----------------------------------
 
   let areaMap;
   try {
@@ -588,6 +728,26 @@ function main() {
     `${JSON.stringify(facilitySummary)}\n`
   );
 
+  // 5b. web/public/flow/area_flow.json — verbatim copy of area_flow_R7.json
+  //     (line-ending normalized to LF only, like area_indicators.json/
+  //     area_demand.json above). NOT bundled into src/generated/: like the
+  //     facility shards above, this is area-detail data only needed once an
+  //     area is selected (doc/REQUIREMENTS.md §6「区域詳細はオンデマンド取得」),
+  //     and at ~499KB (gzip ~126KB) it would bloat the initial JS bundle.
+  //     Unlike the facility shards, it is NOT split per area: the whole
+  //     dataset is a single file, so switching the selected area never
+  //     changes the fetch target — race condition #14 (CLAUDE.md「可視化実装で
+  //     判明した罠」) cannot occur here by construction, since one
+  //     loadFlowData() call is cached and reused for every area.
+  //
+  //     Directory is wiped and recreated (same reasoning as facilitiesOutDir
+  //     above): a shrinking dataset must not leave a stale file on disk.
+  fs.rmSync(flowOutDir, { recursive: true, force: true });
+  fs.mkdirSync(flowOutDir, { recursive: true });
+  const flowText = flowData.raw.replace(/\r\n/g, '\n');
+  fs.writeFileSync(path.join(flowOutDir, 'area_flow.json'), flowText);
+  const flowBytes = Buffer.byteLength(flowText, 'utf8');
+
   console.log(
     `[sync-data] OK: wrote area_indicators.json (${areas.length} areas), ` +
       `area_demand.json (${demandAreas.length} areas), ` +
@@ -602,7 +762,7 @@ function main() {
   );
 
   // 6. web/public/downloads/<BUNDLE_FILE_NAME> — data/processed/ の加工済み
-  //    CSV13本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
+  //    CSV15本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
   //    と同じ理由でディレクトリを一掃してから作り直す(収録物が減ったときに
   //    古いファイルがdistへ残らないようにするため)。
   fs.rmSync(downloadsOutDir, { recursive: true, force: true });
@@ -692,7 +852,7 @@ function main() {
 
   // 8. web/src/generated/download_manifest.json — UIがサイズ・SHA-256・収録物
   //    を表示するための軽量な一覧(bundle実体を取得しなくても内容を説明できる
-  //    ようにする)。membersは13本のCSVのみ(meta.jsonは含めない)。
+  //    ようにする)。membersは15本のCSVのみ(meta.jsonは含めない)。
   const downloadManifest = {
     bundle: {
       file: BUNDLE_FILE_NAME,
@@ -718,7 +878,9 @@ function main() {
       `(${zipBuf.length.toLocaleString('en-US')} bytes, ${zipEntries.length} entries) and ` +
       `area_boundaries_R7.geojson (${boundariesBuf.length.toLocaleString('en-US')} bytes) ` +
       `to ${path.relative(repoRoot, downloadsOutDir)}; wrote download_manifest.json ` +
-      `(${downloadManifest.members.length} CSV members) to ${path.relative(repoRoot, generatedDir)}`
+      `(${downloadManifest.members.length} CSV members) to ${path.relative(repoRoot, generatedDir)}; ` +
+      `wrote area_flow.json (${flowAreas.length} areas, ${flowBytes.toLocaleString('en-US')} bytes) ` +
+      `to ${path.relative(repoRoot, flowOutDir)}`
   );
 }
 

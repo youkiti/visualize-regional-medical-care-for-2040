@@ -13,9 +13,10 @@
   - 病床機能別（高度急性期/急性期/回復期/慢性期）の病床数と将来必要量の比較
   - 在宅（訪問診療）・外来の医療需要推計（2024→2050年度、年度スライダー）
   - 医療機関別の病床数・診療実績・医師数
+  - 患者の流入・流出（NDB 2024年度、構想区域間・3区分別。相手区域の内訳と地図での塗り分け）
 - **CSV ダウンロード**:
-  - 表示条件で絞り込んだ CSV（3種、いずれも由来ヘッダー付き）: 地図に表示中の指標を全339区域ぶん／選択区域1つの基礎情報・病床・医療需要推計／選択区域の医療機関一覧×21指標
-  - 加工済みデータセットの一括ダウンロード: `data/processed/` の CSV 13本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv` を1本の ZIP にまとめて配布（出典メタデータ・SHA-256 同梱）
+  - 表示条件で絞り込んだ CSV（4種、いずれも由来ヘッダー付き）: 地図に表示中の指標を全339区域ぶん／選択区域1つの基礎情報・病床・医療需要推計／選択区域の医療機関一覧×21指標／選択区域の患者の流入元・流出先の内訳
+  - 加工済みデータセットの一括ダウンロード: `data/processed/` の CSV 15本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv` を1本の ZIP にまとめて配布（出典メタデータ・SHA-256 同梱）
 
 詳細は [doc/REQUIREMENTS.md](doc/REQUIREMENTS.md) を参照。
 
@@ -89,5 +90,5 @@ npm run dev
 - [x] GitHub Actions によるビルド・Pages デプロイ（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)）
 - [x] Excel パーサ: 医療需要推計（`tools/parse_demand_forecast.py` → `data/processed/demand_*.csv`）
 - [x] Excel パーサ: 医療機関別の病床数・診療実績等（`tools/parse_facility_beds.py` → `data/processed/facility_*.csv`）と国土数値情報 P04 との名寄せ（[doc/FACILITY_LINKAGE.md](doc/FACILITY_LINKAGE.md)）
-- [x] CSV ダウンロード（表示条件で絞り込んだ CSV 3種と、加工済みデータセットの一括 ZIP）
-- [ ] Excel パーサ: 流入流出（001723366、未実装）
+- [x] CSV ダウンロード（表示条件で絞り込んだ CSV 4種と、加工済みデータセットの一括 ZIP）
+- [x] Excel パーサ: 患者の流入率・流出率（`tools/parse_patient_flow.py` → `data/processed/patient_flow*.csv`）と、区域パネル・地図での可視化

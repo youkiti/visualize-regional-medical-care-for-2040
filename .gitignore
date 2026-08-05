@@ -23,6 +23,10 @@ web/public/facilities/
 # から生成する。上記facilities/と同じく生成物なのでコミットしない）
 web/public/downloads/
 
+# 構想区域間の患者流入出データ（sync-dataがdata/processed/area_flow_R7.jsonから
+# 生成する。上記facilities/・downloads/と同じく生成物なのでコミットしない）
+web/public/flow/
+
 # Claude Code (個人設定はコミットしない)
 .claude/settings.local.json
 

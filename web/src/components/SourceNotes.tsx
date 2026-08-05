@@ -1,5 +1,6 @@
 import type {
   AreaDemandMetadata,
+  AreaFlowMetadata,
   AreaIndicatorsMetadata,
   FacilitySummaryMetadata,
   KnownIssue,
@@ -10,6 +11,9 @@ interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
   facilityMetadata: FacilitySummaryMetadata;
+  /** area_flow.json は遅延取得(区域を選ぶまで取得しない)のため、未取得時はnull
+   * （その間は「患者の流入・流出」の出典ブロックそのものを描画しない）。 */
+  flowMetadata: AreaFlowMetadata | null;
   prefectureMetadata: PrefectureIndicatorsMetadata;
 }
 
@@ -44,6 +48,7 @@ export default function SourceNotes({
   metadata,
   demandMetadata,
   facilityMetadata,
+  flowMetadata,
   prefectureMetadata,
 }: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
@@ -299,6 +304,54 @@ export default function SourceNotes({
       </p>
 
       <KnownIssues issues={prefectureMetadata.known_issues} label="データの既知の問題（都道府県）" />
+
+      {/* flowMetadataはarea_flow.jsonの遅延取得(区域を選ぶまでfetchしない)分、
+          区域未選択の間はnull — その間はブロックごと出さない(brief記載どおり)。
+          processing.caveatはpatient_flow/patient_flow_totalの2キーのオブジェクトで、
+          AreaDemandProcessing.caveat(demand_forecast/demand_population)ともキー名が
+          異なる別の形(CLAUDE.md罠11)のため、demandブロックと同じ流儀で2つとも
+          個別に描画する。 */}
+      {flowMetadata && (
+        <>
+          <h3>出典・注記（患者の流入・流出）</h3>
+
+          <p className="caveat">
+            <strong>流入率・流出率について: </strong>
+            {flowMetadata.processing.caveat.patient_flow}
+          </p>
+          <p className="caveat">
+            <strong>全体の流入率・流出率について: </strong>
+            {flowMetadata.processing.caveat.patient_flow_total}
+          </p>
+
+          <dl>
+            <dt>データ名</dt>
+            <dd>{flowMetadata.source.name}</dd>
+            <dt>公表元</dt>
+            <dd>{flowMetadata.source.publisher}</dd>
+            <dt>公表年度</dt>
+            <dd>{flowMetadata.source.fiscal_year}</dd>
+            <dt>ファイル</dt>
+            <dd>
+              <a href={flowMetadata.source.url} target="_blank" rel="noreferrer">
+                {flowMetadata.source.url}
+              </a>
+            </dd>
+            <dt>掲載ページ</dt>
+            <dd>
+              <a href={flowMetadata.source.page_url} target="_blank" rel="noreferrer">
+                {flowMetadata.source.page_url}
+              </a>
+            </dd>
+            <dt>取得日</dt>
+            <dd>{flowMetadata.source.acquired_date}</dd>
+            <dt>利用規約</dt>
+            <dd>{flowMetadata.source.license}</dd>
+          </dl>
+
+          <KnownIssues issues={flowMetadata.known_issues} label="データの既知の問題（患者の流入・流出）" />
+        </>
+      )}
     </section>
   );
 }

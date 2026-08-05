@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 
 import type {
@@ -21,12 +21,14 @@ import {
   formatChangeRatio,
   formatInteger,
   formatMetricValue,
+  formatPercent,
   formatReceipts,
   isDemandMetric,
   readDemandRatio,
   readDemandValue,
   readMetricValue,
 } from '../lib/metrics';
+import { buildFlowFillColor, buildFlowRateLookup, type FlowOverlay } from '../lib/flowMap';
 import { EMPTY_FACILITY_POINTS, type FacilityPointFeatureCollection, type FacilityPointProperties } from '../lib/facilityPoints';
 
 // 沖縄県〜北海道を含む初期表示範囲。東京都島しょ部(小笠原諸島・南鳥島)は範囲外
@@ -139,6 +141,10 @@ interface MapViewProps {
   demandCategoryLabels: Record<DemandCategoryKey, string>;
   /** 選択区域の医療機関ポイント(App側でfacilityShardから組み立て済み)。未選択/未取得時は空のFeatureCollection。 */
   facilityPoints: FacilityPointFeatureCollection;
+  /** 患者の流入・流出オーバーレイ(App.tsx、D2)。非nullのとき、区域の塗り・ツールチップを
+   * 指標用の表示から差し替える。既存の指標用の式の組み立て・ツールチップには一切手を入れない
+   * （flowOverlayがnullのときの挙動は変えない）。 */
+  flowOverlay: FlowOverlay | null;
 }
 
 /** ホバー中のツールチップの種別を区別する。区域と施設のツールチップを同時に
@@ -212,6 +218,25 @@ function formatHoverTooltip(
   return `${functionLabel}: ${formatMetricValue(metric, readMetricValue(props, metric, bedFunction))}`;
 }
 
+/**
+ * 流入・流出オーバーレイ表示中の区域ホバーのツールチップ本文（1行）。
+ * - 選択中の区域自身: 「自区域内で完結: 65.8%」（selfRateがnullなら「—（原典に自区域の行なし）」）
+ * - 相手区域(lookupにある): 「流出先として 7.5%」/「流入元として 7.5%」（directionLabelで出し分け）
+ * - どちらでもない区域: 「原典で非表示（一定数未満のため0%とは限りません）」
+ */
+function formatFlowTooltipBody(areaCode: string, overlay: FlowOverlay, rateLookup: Map<string, number>): string {
+  if (areaCode === overlay.selfCode) {
+    return overlay.selfRate === null
+      ? '自区域内で完結: —（原典に自区域の行なし）'
+      : `自区域内で完結: ${formatPercent(overlay.selfRate, 1)}`;
+  }
+  const rate = rateLookup.get(areaCode);
+  if (rate === undefined) {
+    return '原典で非表示（一定数未満のため0%とは限りません）';
+  }
+  return `${overlay.directionLabel}として ${formatPercent(rate, 1)}`;
+}
+
 /** 施設ホバーのツールチップ本文（1行）。beds_totalは観測値の施設にしか無いキーなので存在チェックする。 */
 function formatFacilityTooltipBody(props: FacilityPointProperties): string {
   const bedsText =
@@ -236,6 +261,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     demandYearLabel,
     demandCategoryLabels,
     facilityPoints,
+    flowOverlay,
   },
   ref
 ) {
@@ -589,13 +615,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const fillLayer = isPref ? LAYER_PREF_FILL : LAYER_FILL;
     const unavailableLayer = isPref ? LAYER_PREF_UNAVAILABLE_OUTLINE : LAYER_UNAVAILABLE_OUTLINE;
 
+    // flowOverlay非nullのときは指標用の塗りを流入出の式へ差し替える（既存の指標用
+    // 式の組み立てbuildFillColorExpression自体には一切手を入れない — D2）。
+    // 流入出は構想区域単位のデータなので、都道府県層(level==='pref')には適用しない。
+    const useFlowFill = flowOverlay !== null && !isPref;
+
     // 表示中の層の塗りだけを更新する(隠れている層の塗り式は次に表示へ切り替わる
     // ときにこのeffectが走って更新される。分位境界は層ごとに別物なので、
     // 隠れている層へ今の quantileEdges を適用してはいけない)。
     map.setPaintProperty(
       fillLayer,
       'fill-color',
-      buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
+      flowOverlay && !isPref
+        ? buildFlowFillColor(flowOverlay.entries, flowOverlay.selfCode, flowOverlay.selfRate)
+        : buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
     );
     map.setFilter(unavailableLayer, ['!', ['has', `r_${bedFunction}`]]);
 
@@ -615,8 +648,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     // 「算出不可」の破線レイヤは 'ratio' 選択時のみ意味を持つ（need=0で比が算出不可の
     // 区域を示す）。実績/必要数の実数指標でも、需要指標（基準年が全区域で0でないこと
     // をPython側で検証済み — 算出不可の区域はそもそも存在しない）でも非表示にする。
-    // 表示していない層の破線は常に非表示にする。
-    const showUnavailable = metric === 'ratio';
+    // 表示していない層の破線は常に非表示にする。流入出オーバーレイ中は塗りが
+    // 指標と無関係になるため、こちらも隠す。
+    const showUnavailable = metric === 'ratio' && !useFlowFill;
     map.setLayoutProperty(
       LAYER_UNAVAILABLE_OUTLINE,
       'visibility',
@@ -627,7 +661,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       'visibility',
       showUnavailable && isPref ? 'visible' : 'none'
     );
-  }, [bedFunction, metric, quantileEdges, demandYear, level, ready]);
+  }, [bedFunction, metric, quantileEdges, demandYear, level, ready, flowOverlay]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -671,6 +705,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const source = map.getSource(FACILITIES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     source?.setData(facilityPoints);
   }, [facilityPoints, ready]);
+
+  // ツールチップ用の area_code -> rate 参照表。flowOverlayが変わったときだけ
+  // 組み直す(ホバーのたびに再構築しない)。
+  const flowRateLookup = useMemo(() => {
+    if (!flowOverlay) return null;
+    return buildFlowRateLookup(flowOverlay.entries, flowOverlay.selfCode, flowOverlay.selfRate);
+  }, [flowOverlay]);
 
   useImperativeHandle(
     ref,
@@ -737,15 +778,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             {hover.props.pref_name} {hover.props.area_name}
           </div>
           <div>
-            {formatHoverTooltip(
-              hover.props as unknown as Record<string, unknown>,
-              metric,
-              bedFunction,
-              functionLabel,
-              demandYear,
-              demandYearLabel,
-              demandCategoryLabels
-            )}
+            {flowOverlay && flowRateLookup
+              ? formatFlowTooltipBody(hover.props.area_code, flowOverlay, flowRateLookup)
+              : formatHoverTooltip(
+                  hover.props as unknown as Record<string, unknown>,
+                  metric,
+                  bedFunction,
+                  functionLabel,
+                  demandYear,
+                  demandYearLabel,
+                  demandCategoryLabels
+                )}
           </div>
         </div>
       )}

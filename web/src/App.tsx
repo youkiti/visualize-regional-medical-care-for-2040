@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import MapView, { type MapViewHandle } from './components/MapView';
 import Legend from './components/Legend';
@@ -9,8 +9,10 @@ import BulkDownload from './components/BulkDownload';
 import SourceNotes from './components/SourceNotes';
 import { computeQuantileEdges, isDemandMetric } from './lib/metrics';
 import { useFacilityShard } from './lib/facilityShard';
+import { useFlowData } from './lib/flowData';
+import type { FlowOverlay } from './lib/flowMap';
 import { buildFacilityPoints } from './lib/facilityPoints';
-import { buildAreaDetailCsv, buildAreaTableCsv, buildFacilityCsv } from './lib/downloads';
+import { buildAreaDetailCsv, buildAreaFlowCsv, buildAreaTableCsv, buildFacilityCsv } from './lib/downloads';
 import { triggerDownload } from './lib/triggerDownload';
 import mapDataUrl from './generated/area_map.json?url';
 import prefMapDataUrl from './generated/pref_map.json?url';
@@ -27,6 +29,8 @@ import type {
   BedFunctionKey,
   DownloadManifest,
   FacilitySummaryData,
+  FlowDirectionKey,
+  FlowPhaseKey,
   MapLevel,
   MetricKind,
   PrefectureIndicatorsData,
@@ -96,6 +100,25 @@ const downloadManifest = downloadManifestJson as unknown as DownloadManifest;
 // 2040年度にする(バックアップとしてyearsに2040が無い場合は先頭年度)。
 const DEFAULT_YEAR_INDEX = Math.max(demand.years.indexOf(2040), 0);
 
+// area_flow.json は区域を選ぶまで遅延取得しない(useFlowData)ため、取得完了前
+// (idle/loading/error)はFlowPanelへ渡す direction_labels/phase_labels が無い。
+// これらは原典シート名・区分ヘッダーそのままの固定語彙(area_flow.jsonのfields
+// 説明に明記)であり取得結果と食い違うことはないため、取得前はこのフォールバック
+// を渡してFlowPanel側の型をnon-nullに保つ(実際に使われるのは「原典の全体値」
+// 行のみで、そこはstatus==='loaded'のときにしか描画されない)。
+const FLOW_DIRECTION_LABELS_FALLBACK: Record<FlowDirectionKey, string> = { inflow: '流入率', outflow: '流出率' };
+const FLOW_PHASE_LABELS_FALLBACK: Record<FlowPhaseKey, string> = {
+  acute: '高度急性期+急性期',
+  comprehensive: '包括期',
+  chronic: '慢性期',
+};
+
+// 地図オーバーレイ・凡例・ツールチップで使う「役割」ラベル。area_flow.jsonの
+// direction_labels（原典シート名そのままの「流入率」「流出率」）とは別の語彙で、
+// FlowPanel.tsxの方向トグルの文言（DIRECTION_BUTTON_LABELS）と同じ
+// 「流入元」「流出先」を使う（凡例タイトル例「患者の流出先の構成比」に合わせる）。
+const FLOW_ROLE_LABELS: Record<FlowDirectionKey, string> = { inflow: '流入元', outflow: '流出先' };
+
 export default function App() {
   // 既定は構想区域(要件 §3.1 で「主役の表示単位」とされている方)。都道府県は
   // 概観用のレイヤとしてトグルで切り替える。
@@ -104,6 +127,17 @@ export default function App() {
   const [metric, setMetric] = useState<MetricKind>('ratio');
   const [yearIndex, setYearIndex] = useState<number>(DEFAULT_YEAR_INDEX);
   const [selectedAreaCode, setSelectedAreaCode] = useState<string | null>(null);
+  // 患者の流入・流出パネルの表示状態。地図オーバーレイ(次のチャンク)がこの2つを
+  // 読むため、FlowPanel内のローカルstateにせずAppで持つ(brief記載どおり)。
+  const [flowDirection, setFlowDirection] = useState<FlowDirectionKey>('outflow');
+  const [flowPhase, setFlowPhase] = useState<FlowPhaseKey>('acute');
+  // 地図に「相手区域のコロプレス」オーバーレイを出すかどうか。地図の塗りが
+  // 指標(病床/需要)と流入出の2つの意味を同時に持たないよう、指標セレクタ・
+  // 病床機能・年度スライダーを操作したらfalseに戻す(handleBedFunctionChange等)。
+  // 区域選択を解除したときもfalseに戻すが、別区域を選び直したとき(nullを経由
+  // しない切替)は維持し、オーバーレイが新しい区域に追随するようにする
+  // (下のuseEffect、brief記載どおり)。
+  const [flowMapEnabled, setFlowMapEnabled] = useState(false);
   const [selectedPrefCode, setSelectedPrefCode] = useState<string | null>(null);
   const mapRef = useRef<MapViewHandle>(null);
 
@@ -156,6 +190,47 @@ export default function App() {
     useFacilityShard(selectedAreaCode);
   const selectedFacilitySummary = selectedAreaCode ? facilitySummaryByCode.get(selectedAreaCode) ?? null : null;
 
+  // 患者の流入・流出データセット(area_flow.json、約499KB)は339区域ぶん全体で
+  // 1本のファイルだが、区域が一度も選ばれていない間は取得しない
+  // (useFlowDataのenabled引数、flowData.ts参照)。
+  const { status: flowStatus, data: flowData, error: flowError, retry: retryFlow } = useFlowData(
+    selectedAreaCode !== null
+  );
+  const selectedFlowEntry = useMemo(() => {
+    if (!flowData || !selectedAreaCode) return null;
+    return flowData.areas.find((a) => a.area_code === selectedAreaCode) ?? null;
+  }, [flowData, selectedAreaCode]);
+
+  // 区域選択が解除されたら地図オーバーレイも解除する。selectedAreaCodeが
+  // (nullを経由せず)別の区域へ変わるだけのときはこの条件に触れないので
+  // flowMapEnabledは維持され、オーバーレイは新しい区域へ自動的に追随する。
+  useEffect(() => {
+    if (selectedAreaCode === null) setFlowMapEnabled(false);
+  }, [selectedAreaCode]);
+
+  // 地図に渡す患者の流入・流出オーバーレイ。オーバーレイON・区域選択あり・
+  // 流入出データ取得済みの3条件が揃ったときだけ組み立てる。
+  const flowOverlay: FlowOverlay | null = useMemo(() => {
+    // 流入出は構想区域単位のデータなので、都道府県表示中(level==='pref')は
+    // オーバーレイ自体を無効にする。ここでnullにしないと、地図の塗りは
+    // 都道府県の指標のまま凡例だけ流入出の説明が残り、両者が食い違う
+    // （M8の階層トグルとの統合時に実機で見つけた）。構想区域表示へ戻せば
+    // flowMapEnabled は維持されているのでオーバーレイも復帰する。
+    if (level !== 'area') return null;
+    if (!flowMapEnabled || !selectedAreaCode || !selectedArea || !selectedFlowEntry) return null;
+    const group = selectedFlowEntry.flows[flowDirection].phases[flowPhase];
+    return {
+      selfCode: selectedAreaCode,
+      selfRate: group.self_rate,
+      entries: group.partners,
+      direction: flowDirection,
+      phase: flowPhase,
+      areaName: selectedArea.area_name,
+      directionLabel: FLOW_ROLE_LABELS[flowDirection],
+      phaseLabel: (flowData?.phase_labels ?? FLOW_PHASE_LABELS_FALLBACK)[flowPhase],
+    };
+  }, [level, flowMapEnabled, selectedAreaCode, selectedArea, selectedFlowEntry, flowDirection, flowPhase, flowData]);
+
   // 地図に出す医療機関ポイント。選択区域のshardが変わったときだけ組み立て
   // 直す(facilitySummary.metricsはモジュールスコープの定数で参照が変わらない)。
   // shard===null(未選択/未取得)のときは buildFacilityPoints 側が空の
@@ -176,6 +251,30 @@ export default function App() {
     setSelectedAreaCode(null);
     setSelectedPrefCode(null);
   };
+
+  // 指標セレクタ・病床機能・年度スライダーは地図の塗りの意味そのものを
+  // 変える操作なので、流入出オーバーレイがONのままだと塗りが2つの意味を
+  // 同時に持ってしまう。この3操作のいずれかで必ずオーバーレイを解除する
+  // (brief記載どおり)。
+  const handleBedFunctionChange = useCallback((fn: BedFunctionKey) => {
+    setBedFunction(fn);
+    setFlowMapEnabled(false);
+  }, []);
+
+  const handleMetricChange = useCallback((m: MetricKind) => {
+    setMetric(m);
+    setFlowMapEnabled(false);
+  }, []);
+
+  const handleYearIndexChange = useCallback((idx: number) => {
+    setYearIndex(idx);
+    setFlowMapEnabled(false);
+  }, []);
+
+  // FlowPanel「この内訳を地図に表示」トグル。
+  const handleToggleFlowMap = useCallback(() => {
+    setFlowMapEnabled((v) => !v);
+  }, []);
 
   // Map click: MapView already resolved the area_code from the clicked
   // feature (or null on a miss) — just record the selection. The view
@@ -257,6 +356,22 @@ export default function App() {
     triggerDownload(filename, text);
   }, [facilityShard]);
 
+  // 選択中の区域・方向・区分の流入出内訳をCSVにする(FlowPanel「この内訳をCSV」)。
+  const handleDownloadFlow = useCallback(() => {
+    if (!selectedArea || !selectedFlowEntry || !flowData) return;
+    const { filename, text } = buildAreaFlowCsv({
+      area: selectedArea,
+      flowEntry: selectedFlowEntry,
+      direction: flowDirection,
+      phase: flowPhase,
+      directionLabels: flowData.direction_labels,
+      phaseLabels: flowData.phase_labels,
+      flowMetadata: flowData.metadata,
+      areas: indicators.areas,
+    });
+    triggerDownload(filename, text);
+  }, [selectedArea, selectedFlowEntry, flowData, flowDirection, flowPhase]);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -285,16 +400,17 @@ export default function App() {
             demandYearLabel={selectedYearLabel}
             demandCategoryLabels={demand.category_labels}
             facilityPoints={facilityPoints}
+            flowOverlay={flowOverlay}
           />
           <Controls
             level={level}
             onLevelChange={setLevel}
             bedFunction={bedFunction}
-            onBedFunctionChange={setBedFunction}
+            onBedFunctionChange={handleBedFunctionChange}
             functions={indicators.functions}
             functionLabels={indicators.function_labels}
             metric={metric}
-            onMetricChange={setMetric}
+            onMetricChange={handleMetricChange}
             areas={indicators.areas}
             onSelectArea={handleSearchSelect}
             onResetView={handleResetView}
@@ -302,7 +418,7 @@ export default function App() {
             years={demand.years}
             yearLabels={demand.year_labels}
             yearIndex={yearIndex}
-            onYearIndexChange={setYearIndex}
+            onYearIndexChange={handleYearIndexChange}
           />
           <Legend
             level={level}
@@ -311,6 +427,7 @@ export default function App() {
             quantileEdges={quantileEdges}
             demandYearLabel={selectedYearLabel}
             showFacilityNote={level === 'area' && selectedAreaCode !== null}
+            flowOverlay={flowOverlay}
           />
         </div>
         <aside className="side-panel">
@@ -355,6 +472,20 @@ export default function App() {
               facilityValueStatusLabels={facilitySummary.value_status_labels}
               onDownloadAreaDetail={handleDownloadAreaDetail}
               onDownloadFacilities={handleDownloadFacilities}
+              flowStatus={flowStatus}
+              flowEntry={selectedFlowEntry}
+              flowError={flowError}
+              onRetryFlow={retryFlow}
+              flowDirection={flowDirection}
+              flowPhase={flowPhase}
+              onFlowDirectionChange={setFlowDirection}
+              onFlowPhaseChange={setFlowPhase}
+              flowDirectionLabels={flowData?.direction_labels ?? FLOW_DIRECTION_LABELS_FALLBACK}
+              flowPhaseLabels={flowData?.phase_labels ?? FLOW_PHASE_LABELS_FALLBACK}
+              indicatorAreas={indicators.areas}
+              onDownloadFlow={handleDownloadFlow}
+              flowMapEnabled={flowMapEnabled}
+              onToggleFlowMap={handleToggleFlowMap}
             />
           ) : (
             <p className="area-panel-placeholder">
@@ -366,6 +497,7 @@ export default function App() {
             metadata={indicators.metadata}
             demandMetadata={demand.metadata}
             facilityMetadata={facilitySummary.metadata}
+            flowMetadata={flowData?.metadata ?? null}
             prefectureMetadata={prefectureIndicators.metadata}
           />
         </aside>
