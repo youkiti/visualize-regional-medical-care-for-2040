@@ -1,0 +1,1696 @@
+{
+  "metadata": {
+    "title": "都道府県別 病床数 年度間比較（R6公表分の見込量2025・実績2024とR7公表分の実績2025、可視化サイト表示用）",
+    "source": [
+      {
+        "published_fy": "R7",
+        "name": "①都道府県の病床数等（別添４）",
+        "publisher": "厚生労働省",
+        "url": "https://www.mhlw.go.jp/content/10800000/001722915.xlsx",
+        "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html",
+        "fiscal_year": "令和7年度（2025年度）",
+        "source_file": "R7/001722915.xlsx",
+        "source_sha256": "5fe87142f9703a9db96e8f39b44a6ed0666883b6957a9d8ffb4ef55ede6405cd",
+        "source_sheet": "都道府県別必要量との比較",
+        "acquired_date": "2026-08-04",
+        "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html",
+        "original_title": "都道府県別の病床機能報告上の病床数及び地域医療構想における将来の病床数の必要量等",
+        "original_notes": [
+          "※厚生労働省ホームページにおいて公表している病床機能報告の報告結果等を用いて集計。",
+          "　一方で、都道府県において、必要に応じて、これらの報告結果等の更新等を行っている場合もあり、各数値は、都道府県の保有データと一致しない場合があることに留意。",
+          "※病床機能報告の集計結果と将来の病床数の必要量は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要。",
+          "※年度ごとに報告率が異なることに留意が必要。"
+        ]
+      },
+      {
+        "published_fy": "R6",
+        "name": "別添４②（都道府県の病床数等の状況）",
+        "publisher": "厚生労働省",
+        "url": "https://www.mhlw.go.jp/content/10800000/001723128.zip",
+        "source_note": "令和6年度版一括DL zip に同梱(xlsx単体の直リンクではない)",
+        "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html",
+        "fiscal_year": "令和6年度",
+        "source_file": "R6/別添４②（都道府県の病床数等の状況）.xlsx",
+        "source_sha256": "7f30def7ee9be2eafc8916f3a9904b634a2492b6346a2104c355b06c4b135001",
+        "source_sheet": "都道府県別必要量との比較",
+        "acquired_date": "2026-08-05",
+        "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html",
+        "original_title": "都道府県別の病床機能報告上の病床数及び地域医療構想における将来の病床数の必要量等",
+        "original_notes": [
+          "※厚生労働省ホームページにおいて公表している病床機能報告の報告結果等を用いて集計。",
+          "　一方で、都道府県において、必要に応じて、これらの報告結果等の更新等を行っている場合もあり、各数値は、都道府県の保有データと一致しない場合があることに留意。",
+          "※病床機能報告の集計結果と将来の病床数の必要量は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要。",
+          "※年度ごとに報告率が異なることに留意が必要。"
+        ]
+      }
+    ],
+    "processing": {
+      "script": "tools/build_web_prefecture_yoy.py",
+      "inputs": [
+        {
+          "path": "data/processed/prefecture_beds.csv",
+          "sha256": "6251f94ea7dd6828d2f1db003afecd6b8b0f13042d2d3d07fa69e5883b260365"
+        },
+        {
+          "path": "data/processed/prefecture_bed_report_rate.csv",
+          "sha256": "a8d7e3a4d3bafee544dd55bb0e467fa319d3cda17e85a54aa178d239e79a668e"
+        },
+        {
+          "path": "data/processed/prefecture_boundaries_R7.geojson",
+          "sha256": "0ea8bb69414bfe2d3b945adc696d8205bce486e887f5e1b6cc31d50cf7f44779"
+        }
+      ],
+      "steps": [
+        "prefecture_beds.csv・prefecture_bed_report_rate.csv・prefecture_boundaries_R7.geojsonを読み込み",
+        "2CSVにpublished_fy=='R6'/'R7'の両方が存在することを確認(検証1)",
+        "pref_code集合が2CSVのR6/R7で一致し48件(全国含む)、境界GeoJSONが全国を除く47件と一致することを確認(検証2)",
+        "pref_nameがR6/R7/境界GeoJSONの3者で一致することを確認(検証3)",
+        "各pref_code×5機能についてplan_2025(R6見込量2025)・actual_2025(R7実績2025)・actual_2024(R6実績2024)がちょうど1件ずつ存在することを確認(検証4、48×5×3=720セル)",
+        "上記3系列の値が非負の整数で欠測が無いことを確認(検証5)",
+        "report_rate_2024(R6・2024年)・report_rate_2025(R7・2025年)が48件ぶん揃い0〜1の範囲であることを確認(検証6)",
+        "3系列いずれも「合計」が他4機能の和と一致することを確認(検証7)",
+        "3系列いずれも全国(00)が47都道府県の合計と一致することを確認(検証8)",
+        "2024年実績がR6公表分とR7公表分で全キー一致することを確認(検証9。構想区域側の既知の欠陥area_beds_2024_actual_duplicated_as_2025が都道府県層には無いことの担保)",
+        "plan_2025/actual_2024が0の(pref_code,機能)の件数をログ出力(検証10。エラーにはしない。実測は0件だが、将来0が現れてもフロントの「算出不可」機構がそのまま効くため)",
+        "比率(実績2025÷見込量2025・実績2025÷実績2024)は出力せず、フロントエンド側で算出する",
+        "全国(00)はprefectures配列ではなくnationalキーに分け、prefecturesはpref_codeの昇順(文字列ソート)で整列"
+      ],
+      "caveat": "病床機能報告の集計結果(実績)と将来の病床数の必要量(必要数)は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要(原典C2注記より)。可視化でこれらを併記する際は、この点を注記として必ず表示すること。また年度ごとに報告率が異なることにも留意する。 見込量2025はR6公表時点の見込みであり、実績2025(R7公表分)とは公表回が異なる。また報告率が年度により異なるため(report_rate_2024/report_rate_2025)、病床数の年度間の変化には報告率の変動が混ざりうる。なお2024年実績はR6公表分から採っているが、都道府県層ではR7公表分と全キーで一致する(検証9)ため、どちらから採っても同じ値である(構想区域層とは異なり、採用の判断を要しない)。"
+    },
+    "fields": {
+      "functions": "病床機能区分の英字キー一覧(表示順)。total=合計、他4区分の和",
+      "function_labels": "機能キー -> 日本語ラベルの対応(表示用)",
+      "national": "全国(pref_code='00')。境界GeoJSONにフィーチャが無いため prefectures 配列とは分けている。値は原典の公表値であり、47都道府県の合計と一致する(検証8)",
+      "prefectures": "47都道府県(pref_codeの昇順)。全国は含まない",
+      "pref_code": "都道府県コード(ゼロ埋め2桁の文字列)。全国は'00'",
+      "pref_name": "都道府県名",
+      "report_rate_2024": "R6公表分(別添４②)の2024年病床機能報告の報告率(0〜1)。**47都道府県ではR7公表分の同年報告率と全て一致し、全国(00)のみ相違する**(構想区域では339区域中105区域で相違しており、area_bed_report_rate_2024_differs_between_r6_r7 として記録されている)。年度間の病床数の変化を見るときは、報告率自体も年度により異なることに留意すること",
+      "report_rate_2025": "R7公表分の2025年病床機能報告の報告率(0〜1)",
+      "beds": "5機能(total/high_acute/acute/recovery/chronic)ごとのplan_2025/actual_2025/actual_2024",
+      "beds.plan_2025": "R6公表分(別添４②)の2025年見込量(床)。実績2025(R7公表分)とは公表回が異なる見込み値である点に留意(見込みと実績のずれを見る指標)。R7公表分の見込量は2026年が対象のため使えない(CLAUDE.md「R6の列ずれの罠」参照)",
+      "beds.actual_2025": "R7公表分の2025年実績病床数(床)",
+      "beds.actual_2024": "R6公表分の2024年実績病床数(床)。**都道府県層ではR7公表分の同列と240キー全てで一致する**ため(検証9)、どちらの公表回から採っても同じ値である。構想区域側のarea_yoy_2024_actual_from_r6(R7の2024年実績が2025年実績の複製という原典の欠陥を避けるための判断)に相当するものは、都道府県層では生じない"
+    },
+    "known_issues": []
+  },
+  "functions": [
+    "total",
+    "high_acute",
+    "acute",
+    "recovery",
+    "chronic"
+  ],
+  "function_labels": {
+    "total": "合計",
+    "high_acute": "高度急性期",
+    "acute": "急性期",
+    "recovery": "回復期",
+    "chronic": "慢性期"
+  },
+  "national": {
+    "pref_code": "00",
+    "pref_name": "全国",
+    "report_rate_2024": 0.9819297082228117,
+    "report_rate_2025": 0.9860544217687075,
+    "beds": {
+      "total": {
+        "plan_2025": 1173428,
+        "actual_2025": 1163779,
+        "actual_2024": 1178456
+      },
+      "high_acute": {
+        "plan_2025": 159668,
+        "actual_2025": 160140,
+        "actual_2024": 157639
+      },
+      "acute": {
+        "plan_2025": 510496,
+        "actual_2025": 500106,
+        "actual_2024": 515205
+      },
+      "recovery": {
+        "plan_2025": 210284,
+        "actual_2025": 210775,
+        "actual_2024": 206699
+      },
+      "chronic": {
+        "plan_2025": 292980,
+        "actual_2025": 292758,
+        "actual_2024": 298913
+      }
+    }
+  },
+  "prefectures": [
+    {
+      "pref_code": "01",
+      "pref_name": "北海道",
+      "report_rate_2024": 0.9580602883355177,
+      "report_rate_2025": 0.9798387096774194,
+      "beds": {
+        "total": {
+          "plan_2025": 69923,
+          "actual_2025": 69585,
+          "actual_2024": 70682
+        },
+        "high_acute": {
+          "plan_2025": 6479,
+          "actual_2025": 5731,
+          "actual_2024": 6216
+        },
+        "acute": {
+          "plan_2025": 30840,
+          "actual_2025": 30850,
+          "actual_2024": 31562
+        },
+        "recovery": {
+          "plan_2025": 10002,
+          "actual_2025": 10412,
+          "actual_2024": 9609
+        },
+        "chronic": {
+          "plan_2025": 22602,
+          "actual_2025": 22592,
+          "actual_2024": 23295
+        }
+      }
+    },
+    {
+      "pref_code": "02",
+      "pref_name": "青森県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 11984,
+          "actual_2025": 11673,
+          "actual_2024": 12053
+        },
+        "high_acute": {
+          "plan_2025": 1209,
+          "actual_2025": 1186,
+          "actual_2024": 1250
+        },
+        "acute": {
+          "plan_2025": 5940,
+          "actual_2025": 5800,
+          "actual_2024": 6133
+        },
+        "recovery": {
+          "plan_2025": 2377,
+          "actual_2025": 2279,
+          "actual_2024": 2191
+        },
+        "chronic": {
+          "plan_2025": 2458,
+          "actual_2025": 2408,
+          "actual_2024": 2479
+        }
+      }
+    },
+    {
+      "pref_code": "03",
+      "pref_name": "岩手県",
+      "report_rate_2024": 0.9928057553956835,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 11307,
+          "actual_2025": 11340,
+          "actual_2024": 11553
+        },
+        "high_acute": {
+          "plan_2025": 1382,
+          "actual_2025": 1355,
+          "actual_2024": 1382
+        },
+        "acute": {
+          "plan_2025": 4329,
+          "actual_2025": 4560,
+          "actual_2024": 4401
+        },
+        "recovery": {
+          "plan_2025": 2886,
+          "actual_2025": 2917,
+          "actual_2024": 2974
+        },
+        "chronic": {
+          "plan_2025": 2710,
+          "actual_2025": 2508,
+          "actual_2024": 2796
+        }
+      }
+    },
+    {
+      "pref_code": "04",
+      "pref_name": "宮城県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 18719,
+          "actual_2025": 18746,
+          "actual_2024": 18636
+        },
+        "high_acute": {
+          "plan_2025": 2036,
+          "actual_2025": 2092,
+          "actual_2024": 2028
+        },
+        "acute": {
+          "plan_2025": 9790,
+          "actual_2025": 9510,
+          "actual_2024": 9694
+        },
+        "recovery": {
+          "plan_2025": 2936,
+          "actual_2025": 3131,
+          "actual_2024": 2966
+        },
+        "chronic": {
+          "plan_2025": 3957,
+          "actual_2025": 4013,
+          "actual_2024": 3948
+        }
+      }
+    },
+    {
+      "pref_code": "05",
+      "pref_name": "秋田県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 9367,
+          "actual_2025": 9317,
+          "actual_2024": 9752
+        },
+        "high_acute": {
+          "plan_2025": 581,
+          "actual_2025": 597,
+          "actual_2024": 619
+        },
+        "acute": {
+          "plan_2025": 5074,
+          "actual_2025": 5004,
+          "actual_2024": 5258
+        },
+        "recovery": {
+          "plan_2025": 1563,
+          "actual_2025": 1466,
+          "actual_2024": 1596
+        },
+        "chronic": {
+          "plan_2025": 2149,
+          "actual_2025": 2250,
+          "actual_2024": 2279
+        }
+      }
+    },
+    {
+      "pref_code": "06",
+      "pref_name": "山形県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 10102,
+          "actual_2025": 9834,
+          "actual_2024": 10058
+        },
+        "high_acute": {
+          "plan_2025": 1033,
+          "actual_2025": 939,
+          "actual_2024": 939
+        },
+        "acute": {
+          "plan_2025": 4567,
+          "actual_2025": 4378,
+          "actual_2024": 4708
+        },
+        "recovery": {
+          "plan_2025": 2285,
+          "actual_2025": 2260,
+          "actual_2024": 2153
+        },
+        "chronic": {
+          "plan_2025": 2217,
+          "actual_2025": 2257,
+          "actual_2024": 2258
+        }
+      }
+    },
+    {
+      "pref_code": "07",
+      "pref_name": "福島県",
+      "report_rate_2024": 0.9815950920245399,
+      "report_rate_2025": 0.9937888198757764,
+      "beds": {
+        "total": {
+          "plan_2025": 17167,
+          "actual_2025": 16681,
+          "actual_2024": 17388
+        },
+        "high_acute": {
+          "plan_2025": 980,
+          "actual_2025": 891,
+          "actual_2024": 993
+        },
+        "acute": {
+          "plan_2025": 10389,
+          "actual_2025": 9793,
+          "actual_2024": 10484
+        },
+        "recovery": {
+          "plan_2025": 2508,
+          "actual_2025": 2362,
+          "actual_2024": 2503
+        },
+        "chronic": {
+          "plan_2025": 3290,
+          "actual_2025": 3635,
+          "actual_2024": 3408
+        }
+      }
+    },
+    {
+      "pref_code": "08",
+      "pref_name": "茨城県",
+      "report_rate_2024": 0.975103734439834,
+      "report_rate_2025": 0.9451476793248945,
+      "beds": {
+        "total": {
+          "plan_2025": 22795,
+          "actual_2025": 22197,
+          "actual_2024": 22156
+        },
+        "high_acute": {
+          "plan_2025": 1554,
+          "actual_2025": 1605,
+          "actual_2024": 1483
+        },
+        "acute": {
+          "plan_2025": 11787,
+          "actual_2025": 11245,
+          "actual_2024": 11618
+        },
+        "recovery": {
+          "plan_2025": 3431,
+          "actual_2025": 3646,
+          "actual_2024": 3390
+        },
+        "chronic": {
+          "plan_2025": 6023,
+          "actual_2025": 5701,
+          "actual_2024": 5665
+        }
+      }
+    },
+    {
+      "pref_code": "09",
+      "pref_name": "栃木県",
+      "report_rate_2024": 0.9824561403508771,
+      "report_rate_2025": 0.9757575757575757,
+      "beds": {
+        "total": {
+          "plan_2025": 16233,
+          "actual_2025": 16131,
+          "actual_2024": 16159
+        },
+        "high_acute": {
+          "plan_2025": 3053,
+          "actual_2025": 3246,
+          "actual_2024": 2996
+        },
+        "acute": {
+          "plan_2025": 7741,
+          "actual_2025": 7661,
+          "actual_2024": 7830
+        },
+        "recovery": {
+          "plan_2025": 1906,
+          "actual_2025": 1863,
+          "actual_2024": 1850
+        },
+        "chronic": {
+          "plan_2025": 3533,
+          "actual_2025": 3361,
+          "actual_2024": 3483
+        }
+      }
+    },
+    {
+      "pref_code": "10",
+      "pref_name": "群馬県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 18420,
+          "actual_2025": 18057,
+          "actual_2024": 18297
+        },
+        "high_acute": {
+          "plan_2025": 2084,
+          "actual_2025": 2112,
+          "actual_2024": 2084
+        },
+        "acute": {
+          "plan_2025": 8445,
+          "actual_2025": 8082,
+          "actual_2024": 8292
+        },
+        "recovery": {
+          "plan_2025": 3426,
+          "actual_2025": 3428,
+          "actual_2024": 3505
+        },
+        "chronic": {
+          "plan_2025": 4465,
+          "actual_2025": 4435,
+          "actual_2024": 4416
+        }
+      }
+    },
+    {
+      "pref_code": "11",
+      "pref_name": "埼玉県",
+      "report_rate_2024": 0.9463519313304721,
+      "report_rate_2025": 0.9978070175438597,
+      "beds": {
+        "total": {
+          "plan_2025": 50029,
+          "actual_2025": 50752,
+          "actual_2024": 49502
+        },
+        "high_acute": {
+          "plan_2025": 6111,
+          "actual_2025": 6021,
+          "actual_2024": 5942
+        },
+        "acute": {
+          "plan_2025": 25022,
+          "actual_2025": 24919,
+          "actual_2024": 24615
+        },
+        "recovery": {
+          "plan_2025": 6681,
+          "actual_2025": 7191,
+          "actual_2024": 6484
+        },
+        "chronic": {
+          "plan_2025": 12215,
+          "actual_2025": 12621,
+          "actual_2024": 12461
+        }
+      }
+    },
+    {
+      "pref_code": "12",
+      "pref_name": "千葉県",
+      "report_rate_2024": 0.9946949602122016,
+      "report_rate_2025": 0.989247311827957,
+      "beds": {
+        "total": {
+          "plan_2025": 47957,
+          "actual_2025": 47280,
+          "actual_2024": 47456
+        },
+        "high_acute": {
+          "plan_2025": 6868,
+          "actual_2025": 6931,
+          "actual_2024": 6881
+        },
+        "acute": {
+          "plan_2025": 23358,
+          "actual_2025": 22662,
+          "actual_2024": 23073
+        },
+        "recovery": {
+          "plan_2025": 6887,
+          "actual_2025": 7249,
+          "actual_2024": 6821
+        },
+        "chronic": {
+          "plan_2025": 10844,
+          "actual_2025": 10438,
+          "actual_2024": 10681
+        }
+      }
+    },
+    {
+      "pref_code": "13",
+      "pref_name": "東京都",
+      "report_rate_2024": 0.9845788849347569,
+      "report_rate_2025": 0.9809750297265161,
+      "beds": {
+        "total": {
+          "plan_2025": 104381,
+          "actual_2025": 103612,
+          "actual_2024": 104328
+        },
+        "high_acute": {
+          "plan_2025": 22304,
+          "actual_2025": 23973,
+          "actual_2024": 22598
+        },
+        "acute": {
+          "plan_2025": 45891,
+          "actual_2025": 43105,
+          "actual_2024": 45172
+        },
+        "recovery": {
+          "plan_2025": 15327,
+          "actual_2025": 15810,
+          "actual_2024": 15305
+        },
+        "chronic": {
+          "plan_2025": 20859,
+          "actual_2025": 20724,
+          "actual_2024": 21253
+        }
+      }
+    },
+    {
+      "pref_code": "14",
+      "pref_name": "神奈川県",
+      "report_rate_2024": 0.993103448275862,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 60250,
+          "actual_2025": 60946,
+          "actual_2024": 60311
+        },
+        "high_acute": {
+          "plan_2025": 9434,
+          "actual_2025": 9635,
+          "actual_2024": 8871
+        },
+        "acute": {
+          "plan_2025": 28567,
+          "actual_2025": 28290,
+          "actual_2024": 29064
+        },
+        "recovery": {
+          "plan_2025": 8573,
+          "actual_2025": 9081,
+          "actual_2024": 8706
+        },
+        "chronic": {
+          "plan_2025": 13676,
+          "actual_2025": 13940,
+          "actual_2024": 13670
+        }
+      }
+    },
+    {
+      "pref_code": "15",
+      "pref_name": "新潟県",
+      "report_rate_2024": 0.9848484848484849,
+      "report_rate_2025": 0.9770992366412213,
+      "beds": {
+        "total": {
+          "plan_2025": 18512,
+          "actual_2025": 18094,
+          "actual_2024": 18813
+        },
+        "high_acute": {
+          "plan_2025": 1790,
+          "actual_2025": 1798,
+          "actual_2024": 1853
+        },
+        "acute": {
+          "plan_2025": 8892,
+          "actual_2025": 8443,
+          "actual_2024": 9142
+        },
+        "recovery": {
+          "plan_2025": 3647,
+          "actual_2025": 3768,
+          "actual_2024": 3505
+        },
+        "chronic": {
+          "plan_2025": 4183,
+          "actual_2025": 4085,
+          "actual_2024": 4313
+        }
+      }
+    },
+    {
+      "pref_code": "16",
+      "pref_name": "富山県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 11400,
+          "actual_2025": 11399,
+          "actual_2024": 11620
+        },
+        "high_acute": {
+          "plan_2025": 1691,
+          "actual_2025": 1747,
+          "actual_2024": 1723
+        },
+        "acute": {
+          "plan_2025": 3939,
+          "actual_2025": 3782,
+          "actual_2024": 4096
+        },
+        "recovery": {
+          "plan_2025": 1934,
+          "actual_2025": 2093,
+          "actual_2024": 1937
+        },
+        "chronic": {
+          "plan_2025": 3836,
+          "actual_2025": 3777,
+          "actual_2024": 3864
+        }
+      }
+    },
+    {
+      "pref_code": "17",
+      "pref_name": "石川県",
+      "report_rate_2024": 0.9921259842519685,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 12752,
+          "actual_2025": 12639,
+          "actual_2024": 12735
+        },
+        "high_acute": {
+          "plan_2025": 2245,
+          "actual_2025": 2231,
+          "actual_2024": 2231
+        },
+        "acute": {
+          "plan_2025": 4702,
+          "actual_2025": 4715,
+          "actual_2024": 4774
+        },
+        "recovery": {
+          "plan_2025": 2328,
+          "actual_2025": 2171,
+          "actual_2024": 2274
+        },
+        "chronic": {
+          "plan_2025": 3477,
+          "actual_2025": 3522,
+          "actual_2024": 3456
+        }
+      }
+    },
+    {
+      "pref_code": "18",
+      "pref_name": "福井県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 8291,
+          "actual_2025": 8157,
+          "actual_2024": 8485
+        },
+        "high_acute": {
+          "plan_2025": 914,
+          "actual_2025": 902,
+          "actual_2024": 902
+        },
+        "acute": {
+          "plan_2025": 3489,
+          "actual_2025": 3552,
+          "actual_2024": 3703
+        },
+        "recovery": {
+          "plan_2025": 2012,
+          "actual_2025": 1919,
+          "actual_2024": 1944
+        },
+        "chronic": {
+          "plan_2025": 1876,
+          "actual_2025": 1784,
+          "actual_2024": 1936
+        }
+      }
+    },
+    {
+      "pref_code": "19",
+      "pref_name": "山梨県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 8169,
+          "actual_2025": 8049,
+          "actual_2024": 8412
+        },
+        "high_acute": {
+          "plan_2025": 774,
+          "actual_2025": 715,
+          "actual_2024": 727
+        },
+        "acute": {
+          "plan_2025": 3477,
+          "actual_2025": 3313,
+          "actual_2024": 3582
+        },
+        "recovery": {
+          "plan_2025": 1804,
+          "actual_2025": 1814,
+          "actual_2024": 1834
+        },
+        "chronic": {
+          "plan_2025": 2114,
+          "actual_2025": 2207,
+          "actual_2024": 2269
+        }
+      }
+    },
+    {
+      "pref_code": "20",
+      "pref_name": "長野県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 0.9935897435897436,
+      "beds": {
+        "total": {
+          "plan_2025": 17871,
+          "actual_2025": 17771,
+          "actual_2024": 17852
+        },
+        "high_acute": {
+          "plan_2025": 1862,
+          "actual_2025": 1865,
+          "actual_2024": 1947
+        },
+        "acute": {
+          "plan_2025": 8865,
+          "actual_2025": 8942,
+          "actual_2024": 8985
+        },
+        "recovery": {
+          "plan_2025": 3799,
+          "actual_2025": 3519,
+          "actual_2024": 3658
+        },
+        "chronic": {
+          "plan_2025": 3345,
+          "actual_2025": 3445,
+          "actual_2024": 3262
+        }
+      }
+    },
+    {
+      "pref_code": "21",
+      "pref_name": "岐阜県",
+      "report_rate_2024": 0.9732620320855615,
+      "report_rate_2025": 0.9728260869565217,
+      "beds": {
+        "total": {
+          "plan_2025": 15584,
+          "actual_2025": 15129,
+          "actual_2024": 15461
+        },
+        "high_acute": {
+          "plan_2025": 2634,
+          "actual_2025": 2863,
+          "actual_2024": 2497
+        },
+        "acute": {
+          "plan_2025": 7238,
+          "actual_2025": 6498,
+          "actual_2024": 7173
+        },
+        "recovery": {
+          "plan_2025": 2891,
+          "actual_2025": 2992,
+          "actual_2024": 2750
+        },
+        "chronic": {
+          "plan_2025": 2821,
+          "actual_2025": 2776,
+          "actual_2024": 3041
+        }
+      }
+    },
+    {
+      "pref_code": "22",
+      "pref_name": "静岡県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 29845,
+          "actual_2025": 29052,
+          "actual_2024": 29841
+        },
+        "high_acute": {
+          "plan_2025": 5128,
+          "actual_2025": 5065,
+          "actual_2024": 5148
+        },
+        "acute": {
+          "plan_2025": 11968,
+          "actual_2025": 11542,
+          "actual_2024": 11935
+        },
+        "recovery": {
+          "plan_2025": 5162,
+          "actual_2025": 5087,
+          "actual_2024": 5015
+        },
+        "chronic": {
+          "plan_2025": 7587,
+          "actual_2025": 7358,
+          "actual_2024": 7743
+        }
+      }
+    },
+    {
+      "pref_code": "23",
+      "pref_name": "愛知県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 54601,
+          "actual_2025": 53500,
+          "actual_2024": 53996
+        },
+        "high_acute": {
+          "plan_2025": 11474,
+          "actual_2025": 11431,
+          "actual_2024": 11223
+        },
+        "acute": {
+          "plan_2025": 22670,
+          "actual_2025": 21784,
+          "actual_2024": 22755
+        },
+        "recovery": {
+          "plan_2025": 9187,
+          "actual_2025": 9157,
+          "actual_2024": 8741
+        },
+        "chronic": {
+          "plan_2025": 11270,
+          "actual_2025": 11128,
+          "actual_2024": 11277
+        }
+      }
+    },
+    {
+      "pref_code": "24",
+      "pref_name": "三重県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 14573,
+          "actual_2025": 14643,
+          "actual_2024": 14840
+        },
+        "high_acute": {
+          "plan_2025": 2203,
+          "actual_2025": 2218,
+          "actual_2024": 2239
+        },
+        "acute": {
+          "plan_2025": 6504,
+          "actual_2025": 6469,
+          "actual_2024": 6544
+        },
+        "recovery": {
+          "plan_2025": 2369,
+          "actual_2025": 2603,
+          "actual_2024": 2548
+        },
+        "chronic": {
+          "plan_2025": 3497,
+          "actual_2025": 3353,
+          "actual_2024": 3509
+        }
+      }
+    },
+    {
+      "pref_code": "25",
+      "pref_name": "滋賀県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 11584,
+          "actual_2025": 11264,
+          "actual_2024": 11717
+        },
+        "high_acute": {
+          "plan_2025": 1866,
+          "actual_2025": 1784,
+          "actual_2024": 1780
+        },
+        "acute": {
+          "plan_2025": 5094,
+          "actual_2025": 4867,
+          "actual_2024": 5101
+        },
+        "recovery": {
+          "plan_2025": 1923,
+          "actual_2025": 2064,
+          "actual_2024": 1937
+        },
+        "chronic": {
+          "plan_2025": 2701,
+          "actual_2025": 2549,
+          "actual_2024": 2899
+        }
+      }
+    },
+    {
+      "pref_code": "26",
+      "pref_name": "京都府",
+      "report_rate_2024": 0.9471153846153846,
+      "report_rate_2025": 0.9512195121951219,
+      "beds": {
+        "total": {
+          "plan_2025": 25301,
+          "actual_2025": 25086,
+          "actual_2024": 25677
+        },
+        "high_acute": {
+          "plan_2025": 4177,
+          "actual_2025": 3459,
+          "actual_2024": 3776
+        },
+        "acute": {
+          "plan_2025": 9835,
+          "actual_2025": 10612,
+          "actual_2024": 10466
+        },
+        "recovery": {
+          "plan_2025": 5170,
+          "actual_2025": 5071,
+          "actual_2024": 5151
+        },
+        "chronic": {
+          "plan_2025": 6119,
+          "actual_2025": 5944,
+          "actual_2024": 6284
+        }
+      }
+    },
+    {
+      "pref_code": "27",
+      "pref_name": "大阪府",
+      "report_rate_2024": 0.9617834394904459,
+      "report_rate_2025": 0.9596774193548387,
+      "beds": {
+        "total": {
+          "plan_2025": 84017,
+          "actual_2025": 84854,
+          "actual_2024": 85072
+        },
+        "high_acute": {
+          "plan_2025": 15384,
+          "actual_2025": 16266,
+          "actual_2024": 14732
+        },
+        "acute": {
+          "plan_2025": 32295,
+          "actual_2025": 31451,
+          "actual_2024": 32866
+        },
+        "recovery": {
+          "plan_2025": 13350,
+          "actual_2025": 13842,
+          "actual_2024": 13481
+        },
+        "chronic": {
+          "plan_2025": 22988,
+          "actual_2025": 23295,
+          "actual_2024": 23993
+        }
+      }
+    },
+    {
+      "pref_code": "28",
+      "pref_name": "兵庫県",
+      "report_rate_2024": 0.9617977528089887,
+      "report_rate_2025": 0.976905311778291,
+      "beds": {
+        "total": {
+          "plan_2025": 52514,
+          "actual_2025": 51809,
+          "actual_2024": 52890
+        },
+        "high_acute": {
+          "plan_2025": 6612,
+          "actual_2025": 6126,
+          "actual_2024": 6616
+        },
+        "acute": {
+          "plan_2025": 22381,
+          "actual_2025": 21967,
+          "actual_2024": 22638
+        },
+        "recovery": {
+          "plan_2025": 10370,
+          "actual_2025": 10595,
+          "actual_2024": 9984
+        },
+        "chronic": {
+          "plan_2025": 13151,
+          "actual_2025": 13121,
+          "actual_2024": 13652
+        }
+      }
+    },
+    {
+      "pref_code": "29",
+      "pref_name": "奈良県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 12807,
+          "actual_2025": 12911,
+          "actual_2024": 13004
+        },
+        "high_acute": {
+          "plan_2025": 1272,
+          "actual_2025": 1237,
+          "actual_2024": 1276
+        },
+        "acute": {
+          "plan_2025": 6373,
+          "actual_2025": 6435,
+          "actual_2024": 6507
+        },
+        "recovery": {
+          "plan_2025": 2676,
+          "actual_2025": 2673,
+          "actual_2024": 2625
+        },
+        "chronic": {
+          "plan_2025": 2486,
+          "actual_2025": 2566,
+          "actual_2024": 2596
+        }
+      }
+    },
+    {
+      "pref_code": "30",
+      "pref_name": "和歌山県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 10601,
+          "actual_2025": 10237,
+          "actual_2024": 10650
+        },
+        "high_acute": {
+          "plan_2025": 1201,
+          "actual_2025": 809,
+          "actual_2024": 1201
+        },
+        "acute": {
+          "plan_2025": 4409,
+          "actual_2025": 4601,
+          "actual_2024": 4546
+        },
+        "recovery": {
+          "plan_2025": 2567,
+          "actual_2025": 2602,
+          "actual_2024": 2393
+        },
+        "chronic": {
+          "plan_2025": 2424,
+          "actual_2025": 2225,
+          "actual_2024": 2510
+        }
+      }
+    },
+    {
+      "pref_code": "31",
+      "pref_name": "鳥取県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 6580,
+          "actual_2025": 6508,
+          "actual_2024": 6530
+        },
+        "high_acute": {
+          "plan_2025": 832,
+          "actual_2025": 832,
+          "actual_2024": 832
+        },
+        "acute": {
+          "plan_2025": 2860,
+          "actual_2025": 2898,
+          "actual_2024": 2824
+        },
+        "recovery": {
+          "plan_2025": 1251,
+          "actual_2025": 1256,
+          "actual_2024": 1246
+        },
+        "chronic": {
+          "plan_2025": 1637,
+          "actual_2025": 1522,
+          "actual_2024": 1628
+        }
+      }
+    },
+    {
+      "pref_code": "32",
+      "pref_name": "島根県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 7478,
+          "actual_2025": 7195,
+          "actual_2024": 7577
+        },
+        "high_acute": {
+          "plan_2025": 796,
+          "actual_2025": 861,
+          "actual_2024": 805
+        },
+        "acute": {
+          "plan_2025": 2944,
+          "actual_2025": 2962,
+          "actual_2024": 3124
+        },
+        "recovery": {
+          "plan_2025": 1892,
+          "actual_2025": 1686,
+          "actual_2024": 1735
+        },
+        "chronic": {
+          "plan_2025": 1846,
+          "actual_2025": 1686,
+          "actual_2024": 1913
+        }
+      }
+    },
+    {
+      "pref_code": "33",
+      "pref_name": "岡山県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 21657,
+          "actual_2025": 21283,
+          "actual_2024": 21544
+        },
+        "high_acute": {
+          "plan_2025": 4093,
+          "actual_2025": 3828,
+          "actual_2024": 3807
+        },
+        "acute": {
+          "plan_2025": 7889,
+          "actual_2025": 7938,
+          "actual_2024": 8141
+        },
+        "recovery": {
+          "plan_2025": 4532,
+          "actual_2025": 4370,
+          "actual_2024": 4528
+        },
+        "chronic": {
+          "plan_2025": 5143,
+          "actual_2025": 5147,
+          "actual_2024": 5068
+        }
+      }
+    },
+    {
+      "pref_code": "34",
+      "pref_name": "広島県",
+      "report_rate_2024": 0.9705014749262537,
+      "report_rate_2025": 0.9819819819819819,
+      "beds": {
+        "total": {
+          "plan_2025": 28818,
+          "actual_2025": 28468,
+          "actual_2024": 28791
+        },
+        "high_acute": {
+          "plan_2025": 4567,
+          "actual_2025": 4534,
+          "actual_2024": 4578
+        },
+        "acute": {
+          "plan_2025": 10307,
+          "actual_2025": 10565,
+          "actual_2024": 10409
+        },
+        "recovery": {
+          "plan_2025": 6827,
+          "actual_2025": 6564,
+          "actual_2024": 6764
+        },
+        "chronic": {
+          "plan_2025": 7117,
+          "actual_2025": 6805,
+          "actual_2024": 7040
+        }
+      }
+    },
+    {
+      "pref_code": "35",
+      "pref_name": "山口県",
+      "report_rate_2024": 0.9945652173913043,
+      "report_rate_2025": 0.9664804469273743,
+      "beds": {
+        "total": {
+          "plan_2025": 18097,
+          "actual_2025": 17654,
+          "actual_2024": 18516
+        },
+        "high_acute": {
+          "plan_2025": 2029,
+          "actual_2025": 1870,
+          "actual_2024": 1900
+        },
+        "acute": {
+          "plan_2025": 6288,
+          "actual_2025": 6190,
+          "actual_2024": 6505
+        },
+        "recovery": {
+          "plan_2025": 3674,
+          "actual_2025": 3224,
+          "actual_2024": 3681
+        },
+        "chronic": {
+          "plan_2025": 6106,
+          "actual_2025": 6370,
+          "actual_2024": 6430
+        }
+      }
+    },
+    {
+      "pref_code": "36",
+      "pref_name": "徳島県",
+      "report_rate_2024": 0.9935483870967742,
+      "report_rate_2025": 0.9934640522875817,
+      "beds": {
+        "total": {
+          "plan_2025": 10081,
+          "actual_2025": 9897,
+          "actual_2024": 10206
+        },
+        "high_acute": {
+          "plan_2025": 872,
+          "actual_2025": 813,
+          "actual_2024": 1079
+        },
+        "acute": {
+          "plan_2025": 3381,
+          "actual_2025": 3310,
+          "actual_2024": 3141
+        },
+        "recovery": {
+          "plan_2025": 2461,
+          "actual_2025": 2412,
+          "actual_2024": 2535
+        },
+        "chronic": {
+          "plan_2025": 3367,
+          "actual_2025": 3362,
+          "actual_2024": 3451
+        }
+      }
+    },
+    {
+      "pref_code": "37",
+      "pref_name": "香川県",
+      "report_rate_2024": 0.9801324503311258,
+      "report_rate_2025": 0.993103448275862,
+      "beds": {
+        "total": {
+          "plan_2025": 10847,
+          "actual_2025": 10985,
+          "actual_2024": 11088
+        },
+        "high_acute": {
+          "plan_2025": 1007,
+          "actual_2025": 974,
+          "actual_2024": 989
+        },
+        "acute": {
+          "plan_2025": 5099,
+          "actual_2025": 5101,
+          "actual_2024": 5147
+        },
+        "recovery": {
+          "plan_2025": 2040,
+          "actual_2025": 2160,
+          "actual_2024": 2060
+        },
+        "chronic": {
+          "plan_2025": 2701,
+          "actual_2025": 2750,
+          "actual_2024": 2892
+        }
+      }
+    },
+    {
+      "pref_code": "38",
+      "pref_name": "愛媛県",
+      "report_rate_2024": 0.987012987012987,
+      "report_rate_2025": 0.9865470852017937,
+      "beds": {
+        "total": {
+          "plan_2025": 16324,
+          "actual_2025": 16126,
+          "actual_2024": 16477
+        },
+        "high_acute": {
+          "plan_2025": 1196,
+          "actual_2025": 1147,
+          "actual_2024": 1160
+        },
+        "acute": {
+          "plan_2025": 7782,
+          "actual_2025": 7741,
+          "actual_2024": 7978
+        },
+        "recovery": {
+          "plan_2025": 3112,
+          "actual_2025": 3009,
+          "actual_2024": 3000
+        },
+        "chronic": {
+          "plan_2025": 4234,
+          "actual_2025": 4229,
+          "actual_2024": 4339
+        }
+      }
+    },
+    {
+      "pref_code": "39",
+      "pref_name": "高知県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 12465,
+          "actual_2025": 12524,
+          "actual_2024": 12826
+        },
+        "high_acute": {
+          "plan_2025": 827,
+          "actual_2025": 1057,
+          "actual_2024": 1000
+        },
+        "acute": {
+          "plan_2025": 4386,
+          "actual_2025": 4255,
+          "actual_2024": 4694
+        },
+        "recovery": {
+          "plan_2025": 2045,
+          "actual_2025": 2105,
+          "actual_2024": 1981
+        },
+        "chronic": {
+          "plan_2025": 5207,
+          "actual_2025": 5107,
+          "actual_2024": 5151
+        }
+      }
+    },
+    {
+      "pref_code": "40",
+      "pref_name": "福岡県",
+      "report_rate_2024": 0.9614890885750963,
+      "report_rate_2025": 0.967828418230563,
+      "beds": {
+        "total": {
+          "plan_2025": 63133,
+          "actual_2025": 62230,
+          "actual_2024": 63742
+        },
+        "high_acute": {
+          "plan_2025": 7753,
+          "actual_2025": 7862,
+          "actual_2024": 7745
+        },
+        "acute": {
+          "plan_2025": 24401,
+          "actual_2025": 24392,
+          "actual_2024": 24732
+        },
+        "recovery": {
+          "plan_2025": 13181,
+          "actual_2025": 12425,
+          "actual_2024": 12665
+        },
+        "chronic": {
+          "plan_2025": 17798,
+          "actual_2025": 17551,
+          "actual_2024": 18600
+        }
+      }
+    },
+    {
+      "pref_code": "41",
+      "pref_name": "佐賀県",
+      "report_rate_2024": 0.995,
+      "report_rate_2025": 0.9637305699481865,
+      "beds": {
+        "total": {
+          "plan_2025": 11062,
+          "actual_2025": 11305,
+          "actual_2024": 11192
+        },
+        "high_acute": {
+          "plan_2025": 249,
+          "actual_2025": 249,
+          "actual_2024": 255
+        },
+        "acute": {
+          "plan_2025": 4958,
+          "actual_2025": 4767,
+          "actual_2024": 5083
+        },
+        "recovery": {
+          "plan_2025": 2297,
+          "actual_2025": 2375,
+          "actual_2024": 2278
+        },
+        "chronic": {
+          "plan_2025": 3558,
+          "actual_2025": 3914,
+          "actual_2024": 3576
+        }
+      }
+    },
+    {
+      "pref_code": "42",
+      "pref_name": "長崎県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 0.9928057553956835,
+      "beds": {
+        "total": {
+          "plan_2025": 18182,
+          "actual_2025": 17828,
+          "actual_2024": 18407
+        },
+        "high_acute": {
+          "plan_2025": 1414,
+          "actual_2025": 1404,
+          "actual_2024": 1511
+        },
+        "acute": {
+          "plan_2025": 7397,
+          "actual_2025": 7294,
+          "actual_2024": 7578
+        },
+        "recovery": {
+          "plan_2025": 3759,
+          "actual_2025": 3609,
+          "actual_2024": 3696
+        },
+        "chronic": {
+          "plan_2025": 5612,
+          "actual_2025": 5521,
+          "actual_2024": 5622
+        }
+      }
+    },
+    {
+      "pref_code": "43",
+      "pref_name": "熊本県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 25409,
+          "actual_2025": 24868,
+          "actual_2024": 25404
+        },
+        "high_acute": {
+          "plan_2025": 2646,
+          "actual_2025": 2646,
+          "actual_2024": 2668
+        },
+        "acute": {
+          "plan_2025": 8113,
+          "actual_2025": 8038,
+          "actual_2024": 8280
+        },
+        "recovery": {
+          "plan_2025": 6726,
+          "actual_2025": 6025,
+          "actual_2024": 6314
+        },
+        "chronic": {
+          "plan_2025": 7924,
+          "actual_2025": 8159,
+          "actual_2024": 8142
+        }
+      }
+    },
+    {
+      "pref_code": "44",
+      "pref_name": "大分県",
+      "report_rate_2024": 0.9905956112852664,
+      "report_rate_2025": 1.0,
+      "beds": {
+        "total": {
+          "plan_2025": 16230,
+          "actual_2025": 15632,
+          "actual_2024": 16463
+        },
+        "high_acute": {
+          "plan_2025": 1210,
+          "actual_2025": 1258,
+          "actual_2024": 1257
+        },
+        "acute": {
+          "plan_2025": 8138,
+          "actual_2025": 7776,
+          "actual_2024": 8240
+        },
+        "recovery": {
+          "plan_2025": 3881,
+          "actual_2025": 3672,
+          "actual_2024": 3848
+        },
+        "chronic": {
+          "plan_2025": 3001,
+          "actual_2025": 2926,
+          "actual_2024": 3118
+        }
+      }
+    },
+    {
+      "pref_code": "45",
+      "pref_name": "宮崎県",
+      "report_rate_2024": 0.9570815450643777,
+      "report_rate_2025": 0.9911111111111112,
+      "beds": {
+        "total": {
+          "plan_2025": 12897,
+          "actual_2025": 12968,
+          "actual_2024": 12872
+        },
+        "high_acute": {
+          "plan_2025": 814,
+          "actual_2025": 826,
+          "actual_2024": 826
+        },
+        "acute": {
+          "plan_2025": 6879,
+          "actual_2025": 6828,
+          "actual_2024": 6972
+        },
+        "recovery": {
+          "plan_2025": 2185,
+          "actual_2025": 2064,
+          "actual_2024": 2074
+        },
+        "chronic": {
+          "plan_2025": 3019,
+          "actual_2025": 3250,
+          "actual_2024": 3000
+        }
+      }
+    },
+    {
+      "pref_code": "46",
+      "pref_name": "鹿児島県",
+      "report_rate_2024": 1.0,
+      "report_rate_2025": 0.9976303317535545,
+      "beds": {
+        "total": {
+          "plan_2025": 23753,
+          "actual_2025": 23743,
+          "actual_2024": 23828
+        },
+        "high_acute": {
+          "plan_2025": 1752,
+          "actual_2025": 1694,
+          "actual_2024": 1811
+        },
+        "acute": {
+          "plan_2025": 9661,
+          "actual_2025": 9548,
+          "actual_2024": 9496
+        },
+        "recovery": {
+          "plan_2025": 5904,
+          "actual_2025": 5940,
+          "actual_2024": 5857
+        },
+        "chronic": {
+          "plan_2025": 6436,
+          "actual_2025": 6561,
+          "actual_2024": 6664
+        }
+      }
+    },
+    {
+      "pref_code": "47",
+      "pref_name": "沖縄県",
+      "report_rate_2024": 0.936,
+      "report_rate_2025": 0.9754098360655737,
+      "beds": {
+        "total": {
+          "plan_2025": 13359,
+          "actual_2025": 13820,
+          "actual_2024": 13597
+        },
+        "high_acute": {
+          "plan_2025": 1276,
+          "actual_2025": 1455,
+          "actual_2024": 1263
+        },
+        "acute": {
+          "plan_2025": 6142,
+          "actual_2025": 5671,
+          "actual_2024": 6144
+        },
+        "recovery": {
+          "plan_2025": 2540,
+          "actual_2025": 2814,
+          "actual_2024": 2607
+        },
+        "chronic": {
+          "plan_2025": 3401,
+          "actual_2025": 3880,
+          "actual_2024": 3583
+        }
+      }
+    }
+  ]
+}

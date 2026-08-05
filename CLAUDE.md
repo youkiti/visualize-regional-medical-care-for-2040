@@ -72,7 +72,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/prefecture_indicators_R7.json`（`tools/build_web_prefecture.py` が生成、47都道府県+全国の病床と需要）・`data/processed/prefecture_boundaries_R7.geojson`（`tools/build_prefecture_boundaries.py` が生成、47都道府県）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_yoy_R6_R7.json`（`tools/build_web_yoy.py` が生成、339構想区域のR6→R7年度間比較。見込量2025(R6)・実績2025(R7)・実績2024(R6)）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_flow_R7.json`（`tools/build_web_flow.py` が生成、339区域×2方向×3区分の患者流入出）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV17本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/flow/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/prefecture_indicators_R7.json`（`tools/build_web_prefecture.py` が生成、47都道府県+全国の病床と需要）・`data/processed/prefecture_yoy_R6_R7.json`（`tools/build_web_prefecture_yoy.py` が生成、47都道府県+全国のR6→R7年度間比較）・`data/processed/prefecture_boundaries_R7.geojson`（`tools/build_prefecture_boundaries.py` が生成、47都道府県）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_yoy_R6_R7.json`（`tools/build_web_yoy.py` が生成、339構想区域のR6→R7年度間比較。見込量2025(R6)・実績2025(R7)・実績2024(R6)）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_flow_R7.json`（`tools/build_web_flow.py` が生成、339区域×2方向×3区分の患者流入出）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV17本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/flow/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
@@ -88,7 +88,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `public/downloads/area_boundaries_R7.geojson` | 正本の忠実コピー（単体利用向け。ZIPには入れない） |
 | `src/generated/download_manifest.json` | ZIP/GeoJSONのサイズ・SHA-256・収録CSV一覧（約3.9KB）。**バンドルに取り込み**、一括DLセクションの表示に使う |
 | `prefecture_indicators.json` | 都道府県（概観レイヤ）の正本の忠実コピー（約75KB）。**バンドルに取り込み**、都道府県パネル・分位計算・出典表示に使う |
-| `pref_map.json` | 都道府県境界 + フラット化した指標プロパティ（約2.5MB・gzip650KB）。`area_map.json` と同じく**`?url` インポートでMapLibreにfetchさせる**。プロパティ名も `a_/n_/r_<機能>`・`<区分>_<年>` と区域側と同一 |
+| `prefecture_yoy.json` | 都道府県のR6→R7年度間比較の正本の忠実コピー（約47KB）。**バンドルに取り込み**、都道府県パネルの年度間比較テーブル・出典表示・CSVに使う |
+| `pref_map.json` | 都道府県境界 + フラット化した指標プロパティ（約2.5MB・gzip650KB）。`area_map.json` と同じく**`?url` インポートでMapLibreにfetchさせる**。プロパティ名も `a_/n_/r_<機能>`・`<区分>_<年>`・年度間比較の `y_*` と区域側と同一 |
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
 
@@ -142,6 +143,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 表示用JSON側は `build_web_data.py`・`build_web_demand.py`・`build_web_flow.py` が入力CSVの `meta.json` から集約する（**その場で新規に書き足さない**。ただし「表示用データセットを作る過程で下した判断」は例外で、`area_indicators_2024_actual_excluded` がその例）。
 - 画面側は `SourceNotes.tsx` の `KnownIssues` が病床・需要・医療機関・患者の流入出を同じ形で描画する。**描画してよいのは `summary`・`action` の文字列だけ**（`scope` はオブジェクト・`evidence` は配列なので、そのまま描画すると罠11を踏む）。
 - 現在の登録件数は病床3件（うち1件は `build_web_data.py` 側）・需要1件・医療機関1件・患者の流入出2件。テストが形（id重複なし・必須キー・`scope.csv` の実在）を固定しているので、形を崩すと落ちる。
+- **欠陥でない事実を `known_issues` に入れないこと**（M12）。導線の終点が画面の「データの既知の問題」欄なので、「問題ではないが特筆すべき事実」を入れると利用者に誤った警告を出すことになる。例: 都道府県層では2024年実績がR6公表分とR7公表分で完全一致するため、区域層の `area_yoy_2024_actual_from_r6`（R6を採るという判断の記録）に相当するものが無い ―― これは**判断が不要だったという良い知らせ**なので、`known_issues` ではなく `processing.caveat` と `fields` に書き、代わりに**一致することをビルド時の検証で固定する**（崩れたら落ちる）。
 
 ## 環境
 
@@ -192,6 +194,7 @@ PYTHONIOENCODING=utf-8 python tools/build_web_demand.py      # → area_demand_R
 PYTHONIOENCODING=utf-8 python tools/build_web_facilities.py  # → area_facilities_R7.json（医療機関×21指標）
 PYTHONIOENCODING=utf-8 python tools/build_web_yoy.py          # → area_yoy_R6_R7.json（R6→R7年度間比較）
 PYTHONIOENCODING=utf-8 python tools/build_web_prefecture.py  # → prefecture_indicators_R7.json（都道府県。要 prefecture_boundaries_R7.geojson）
+PYTHONIOENCODING=utf-8 python tools/build_web_prefecture_yoy.py  # → prefecture_yoy_R6_R7.json（都道府県のR6→R7比較）
 PYTHONIOENCODING=utf-8 python tools/build_web_flow.py        # → area_flow_R7.json（患者の流入率・流出率）
 
 # テスト
@@ -357,4 +360,9 @@ npm run typecheck  # tsc --noEmit のみ
 
 **保留**: 医療情報ネットの公表座標を座標源として統合すること（要件 §4.3 の改定を伴う。判断材料・満たすべき条件・越えてはならない一線・再検討条件はすべて `doc/DECISION_FACILITY_COORDINATES.md` にある）。
 
-**未実装**: 都道府県層の年度間比較（R6→R7）。データ自体は `prefecture_beds.csv` に揃っており（R6の見込量2025・実績2024、R7の実績2025が48エンティティ×5機能=240キーずつ、**分母0が1件も無く**、都道府県の2024年実績はR6/R7で240キー完全一致するため区域層で必要だった `area_yoy_2024_actual_from_r6` の判断も不要）、`prefecture_yoy_R6_R7.json` を作って `buildPrefectureMap` に `y_*` プロパティを足せば、地図・凡例・ツールチップは指標キー名で駆動しているためそのまま動く。現状は都道府県表示中にyoy指標を選ぶと地図が全県「算出不可」になる。
+**M12「都道府県層の年度間比較（R6→R7）」完了**: 表示単位トグルが全指標で成立するようになった（それまで都道府県表示中にyoy指標を選ぶと地図が全県「算出不可」のグレーになり、凡例だけ7色スケールを出していた）。新しい生データは使わず、コミット済みCSVだけから作る。
+- ビルダ `tools/build_web_prefecture_yoy.py` → `data/processed/prefecture_yoy_R6_R7.json`（47都道府県＋`national`・約47KB）。入力は `prefecture_beds.csv`（R6見込量2025・R6実績2024・R7実績2025）・`prefecture_bed_report_rate.csv`・`prefecture_boundaries_R7.geojson`（pref_code検証のみ）。検証10項目
+- **都道府県層は区域層より素直**という実測を検証で固定した: (a) **2024年実績がR6公表分とR7公表分で240キー完全一致**（検証9）。区域層で必要だった「R6を採る」判断（`area_yoy_2024_actual_from_r6`）が発生しないので、この known_issue に相当するものは持たない。(b) **見込量2025・実績2024に0が1件も無い**（検証10）ので「算出不可」が原理的に出ない（区域層は81件）。(c) 2024年の報告率がR6/R7で相違するのは**全国値のみ**で47都道府県は全一致（区域層は339区域中105区域が相違）
+- **非欠陥を `known_issues` に入れない**: 上記(a)は「問題」ではないので、画面の「データの既知の問題」欄に出さず `processing.caveat` と `fields` に書く。`known_issues` は入力CSVのmeta.jsonから引き継ぐだけにしている
+- 地図は `merge.mjs` の `buildPrefectureMap` に `y_*` を足すだけで動く（**プロパティ名・分母0のときキーごと省く規約とも区域層と同一**なので、MapView・Legend・metrics.ts は無変更）。`buildPrefectureMap` は「指標データセットと年度間比較データセットの `actual_2025` が全都道府県×5機能で一致すること」も検証する（ツールチップが分子を指標側・分母を比較側から読むため、ずれると表示だけが静かに食い違う）
+- 都道府県パネルに年度間比較テーブル（区域パネルと同じ列構成）・報告率2年ぶん・注記、`SourceNotes` に出典ブロック、CSV2本（`buildPrefectureTableCsv` の yoy 分岐・`buildPrefectureDetailCsv` の `dataset=yoy` 行）を追加。M11でボタンを無効化していた「都道府県×年度間比較」の組み合わせは解除した

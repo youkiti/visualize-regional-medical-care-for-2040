@@ -29,6 +29,9 @@ import type {
   PrefectureIndicator,
   PrefectureIndicatorsData,
   PrefectureIndicatorsMetadata,
+  PrefectureYoyData,
+  PrefectureYoyEntry,
+  PrefectureYoyMetadata,
 } from '../types';
 
 // 小さなインラインフィクスチャのみを使う。src/generated/* はnpm run sync-data
@@ -1062,6 +1065,84 @@ function makePrefectureData(prefectures: PrefectureIndicator[]): PrefectureIndic
   };
 }
 
+// 都道府県層の年度間比較（R6→R7）。区域側の YOY_METADATA と同じ形
+// （source は R7/R6 の2要素配列）だが、全国が national キーに分かれる点と、
+// 「2024年実績はR6/R7で一致するので採用の判断が無い」ため
+// area_yoy_2024_actual_from_r6 に相当する known_issue を持たない点が違う。
+const PREFECTURE_YOY_METADATA: PrefectureYoyMetadata = {
+  title: 'test-prefecture-yoy',
+  source: [
+    {
+      published_fy: 'R7',
+      name: '①都道府県の病床数等（別添４）',
+      publisher: '厚生労働省',
+      url: 'https://example.test/001722915.xlsx',
+      page_url: 'https://example.test/pref-yoy-page',
+      fiscal_year: '令和7年度（2025年度）',
+      source_file: 'R7/001722915.xlsx',
+      source_sha256: 'pr7hash',
+      source_sheet: '都道府県別必要量との比較',
+      acquired_date: '2026-08-04',
+      license: 'テスト利用規約',
+      original_title: 'R7原題',
+      original_notes: [],
+    },
+    {
+      published_fy: 'R6',
+      name: '別添４②（都道府県の病床数等の状況）',
+      publisher: '厚生労働省',
+      url: 'https://example.test/r6bundle.zip',
+      source_note: '令和6年度版一括DL zip に同梱',
+      page_url: 'https://example.test/pref-yoy-page',
+      fiscal_year: '令和6年度',
+      source_file: 'R6/別添４②（都道府県の病床数等の状況）.xlsx',
+      source_sha256: 'pr6hash',
+      source_sheet: '都道府県別必要量との比較',
+      acquired_date: '2026-08-05',
+      license: 'テスト利用規約',
+      original_title: 'R6原題',
+      original_notes: [],
+    },
+  ],
+  processing: {
+    script: 'tools/build_web_prefecture_yoy.py',
+    inputs: [],
+    steps: [],
+    caveat: '都道府県の年度間比較の注記テキスト',
+  },
+  fields: {},
+  known_issues: [],
+};
+
+function makePrefectureYoyEntry(overrides: Partial<PrefectureYoyEntry> = {}): PrefectureYoyEntry {
+  return {
+    pref_code: '01',
+    pref_name: '北海道',
+    report_rate_2024: 0.958,
+    report_rate_2025: 0.98,
+    beds: {
+      total: { plan_2025: 76000, actual_2025: 78000, actual_2024: 79000 },
+      high_acute: { plan_2025: 4800, actual_2025: 5000, actual_2024: 5200 },
+      acute: { plan_2025: 29000, actual_2025: 30000, actual_2024: 30500 },
+      recovery: { plan_2025: 15200, actual_2025: 15000, actual_2024: 15300 },
+      chronic: { plan_2025: 27000, actual_2025: 28000, actual_2024: 28000 },
+    },
+    ...overrides,
+  };
+}
+
+function makePrefectureYoyData(prefectures: PrefectureYoyEntry[]): PrefectureYoyData {
+  return {
+    metadata: PREFECTURE_YOY_METADATA,
+    functions: ['total', 'high_acute', 'acute', 'recovery', 'chronic'],
+    function_labels: FULL_FUNCTION_LABELS,
+    national: makePrefectureYoyEntry({ pref_code: '00', pref_name: '全国' }),
+    prefectures,
+  };
+}
+
+const PREFECTURE_YOY = makePrefectureYoyData([makePrefectureYoyEntry()]);
+
 describe('buildPrefectureTableCsv (bed metrics)', () => {
   it('produces one row per prefecture for the selected bed function, with a self-describing filename/header', () => {
     const data = makePrefectureData([
@@ -1071,6 +1152,7 @@ describe('buildPrefectureTableCsv (bed metrics)', () => {
 
     const { filename, text } = buildPrefectureTableCsv({
       prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
       metric: 'ratio',
       bedFunction: 'acute',
       year: 2024,
@@ -1100,6 +1182,7 @@ describe('buildPrefectureTableCsv (bed metrics)', () => {
 
     const { text } = buildPrefectureTableCsv({
       prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
       metric: 'actual',
       bedFunction: 'total',
       year: 2024,
@@ -1132,6 +1215,7 @@ describe('buildPrefectureTableCsv (bed metrics)', () => {
 
     const { text } = buildPrefectureTableCsv({
       prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
       metric: 'ratio',
       bedFunction: 'high_acute',
       year: 2024,
@@ -1148,6 +1232,7 @@ describe('buildPrefectureTableCsv (demand metrics)', () => {
 
     const { filename, text } = buildPrefectureTableCsv({
       prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
       metric: 'demand_home_care',
       bedFunction: 'total',
       year: 2040,
@@ -1179,6 +1264,7 @@ describe('buildPrefectureTableCsv (demand metrics)', () => {
 
     const { text } = buildPrefectureTableCsv({
       prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
       metric: 'demand_outpatient',
       bedFunction: 'total',
       year: 2024,
@@ -1191,15 +1277,101 @@ describe('buildPrefectureTableCsv (demand metrics)', () => {
 });
 
 describe('buildPrefectureTableCsv (yoy metrics)', () => {
-  it('throws instead of silently emitting the 339-area CSV (都道府県層に年度間比較のデータセットが無い)', () => {
-    const data = makePrefectureData([makePrefecture()]);
+  const data = makePrefectureData([makePrefecture()]);
 
-    expect(() =>
-      buildPrefectureTableCsv({ prefectures: data, metric: 'yoy_plan_vs_actual', bedFunction: 'total', year: 2024 })
-    ).toThrow(/年度間比較/);
-    expect(() =>
-      buildPrefectureTableCsv({ prefectures: data, metric: 'yoy_actual_change', bedFunction: 'total', year: 2024 })
-    ).toThrow(/年度間比較/);
+  it('emits one row per prefecture with _r6/_r7 suffixed columns and no published_fy column', () => {
+    const { filename, text } = buildPrefectureTableCsv({
+      prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
+      metric: 'yoy_plan_vs_actual',
+      bedFunction: 'acute',
+      year: 2024,
+    });
+
+    expect(filename).toBe('prefecture_yoy_yoy_plan_vs_actual_acute_R6_R7.csv');
+
+    const lines = text.split('\r\n');
+    // 値が列ごとにR6/R7混在なので published_fy 列は持たない（罠33。区域版と同じ規律）
+    const header = lines.find((l) => l.startsWith('pref_code'))!;
+    expect(header).toBe(
+      'pref_code,pref_name,bed_function,plan_2025_r6,actual_2025_r7,actual_2024_r6,report_rate_2024_r6,report_rate_2025_r7,ratio,note'
+    );
+    expect(header.startsWith('published_fy')).toBe(false);
+
+    // 30000/29000 = 1.0345（小数第4位丸め）
+    const row = lines.find((l) => l.startsWith('01,'))!;
+    expect(row).toBe('01,北海道,急性期,29000,30000,30500,0.958,0.98,1.0345,');
+  });
+
+  it('uses actual_2024 as the denominator for yoy_actual_change', () => {
+    const { filename, text } = buildPrefectureTableCsv({
+      prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
+      metric: 'yoy_actual_change',
+      bedFunction: 'acute',
+      year: 2024,
+    });
+
+    expect(filename).toBe('prefecture_yoy_yoy_actual_change_acute_R6_R7.csv');
+    // 30000/30500 = 0.9836
+    const row = text.split('\r\n').find((l) => l.startsWith('01,'))!;
+    expect(row.endsWith(',0.9836,')).toBe(true);
+  });
+
+  it('embeds both R7/R6 source blocks and says the 2024 actuals agree across publications', () => {
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
+      metric: 'yoy_plan_vs_actual',
+      bedFunction: 'total',
+      year: 2024,
+    });
+
+    expect(text).toContain('原典ファイル: R7/001722915.xlsx（SHA-256: pr7hash）');
+    expect(text).toContain(
+      'R6公表分の原典ファイル: R6/別添４②（都道府県の病床数等の状況）.xlsx（SHA-256: pr6hash） / 取得日: 2026-08-05'
+    );
+    expect(text).toContain('注記: 都道府県の年度間比較の注記テキスト');
+    // 区域側の「R6を採用した」という判断ではなく、「一致するのでどちらでも同じ」と書く
+    expect(text).toContain('注記（2024年実績について）: 都道府県ではR6公表分とR7公表分の2024年実績が全て一致する');
+  });
+
+  it('excludes 全国 from the rows here too', () => {
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      prefectureYoy: PREFECTURE_YOY,
+      metric: 'yoy_plan_vs_actual',
+      bedFunction: 'total',
+      year: 2024,
+    });
+    const dataLines = text.split('\r\n').filter((l) => /^\d{2},/.test(l));
+    expect(dataLines).toHaveLength(1);
+    expect(dataLines.some((l) => l.startsWith('00,'))).toBe(false);
+  });
+
+  it('marks the ratio unavailable if a denominator is ever 0 (実データには無いが機構は共通)', () => {
+    const zeroPlan = makePrefectureYoyData([
+      makePrefectureYoyEntry({
+        beds: {
+          total: { plan_2025: 76000, actual_2025: 78000, actual_2024: 79000 },
+          high_acute: { plan_2025: 0, actual_2025: 5000, actual_2024: 5200 },
+          acute: { plan_2025: 29000, actual_2025: 30000, actual_2024: 30500 },
+          recovery: { plan_2025: 15200, actual_2025: 15000, actual_2024: 15300 },
+          chronic: { plan_2025: 27000, actual_2025: 28000, actual_2024: 28000 },
+        },
+      }),
+    ]);
+
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      prefectureYoy: zeroPlan,
+      metric: 'yoy_plan_vs_actual',
+      bedFunction: 'high_acute',
+      year: 2024,
+    });
+
+    const row = text.split('\r\n').find((l) => l.startsWith('01,'))!;
+    expect(row).toBe('01,北海道,高度急性期,0,5000,5200,0.958,0.98,,見込量2025が0のため比は算出不可');
   });
 });
 
@@ -1207,6 +1379,8 @@ describe('buildPrefectureDetailCsv', () => {
   const detailArgs = {
     prefecture: makePrefecture(),
     metadata: PREFECTURE_METADATA,
+    yoyEntry: makePrefectureYoyEntry(),
+    yoyMetadata: PREFECTURE_YOY_METADATA,
     functions: ['total', 'high_acute'] as BedFunctionKey[],
     functionLabels: FULL_FUNCTION_LABELS,
     demandCategories: ['home_care'] as Array<'home_care' | 'outpatient'>,
@@ -1227,8 +1401,8 @@ describe('buildPrefectureDetailCsv', () => {
     );
 
     const dataLines = lines.filter((l) => l.startsWith('R7,01,'));
-    // basic 4 + beds 2機能×4 + demand 1区分×2年×2系列 = 16行
-    expect(dataLines).toHaveLength(16);
+    // basic 4 + beds 2機能×4 + demand 1区分×2年×2系列 + yoy(報告率2 + 2機能×5) = 28行
+    expect(dataLines).toHaveLength(28);
 
     // 公表値そのものの行は note が空。
     expect(dataLines[0]).toBe('R7,01,北海道,21,basic,基礎情報,人口（2020年国勢調査）,2020,5224614,人,');
@@ -1269,9 +1443,38 @@ describe('buildPrefectureDetailCsv', () => {
     expect(text).toContain('出力条件: 対象=都道府県 01 北海道（構想区域 21 区域）');
     expect(text).toContain('注記: 都道府県の病床の注記テキスト');
     expect(text).toContain('注記（医療需要推計）: 都道府県のレセプト件数/月の注記 都道府県の基準人口の注記');
+    expect(text).toContain('注記（年度間比較）: 都道府県の年度間比較の注記テキスト');
     expect(text).toContain(
       `注記（医療需要・基準人口が派生値であること）: ${PREF_DERIVED_ISSUE_SUMMARY}／${PREF_DERIVED_ISSUE_ACTION}`
     );
+  });
+
+  it('emits dataset=yoy rows, naming the publication in the series and noting the R6/R7 agreement', () => {
+    const { text } = buildPrefectureDetailCsv(detailArgs);
+    const rows = text.split('\r\n').filter((l) => l.includes(',yoy,'));
+
+    // 報告率2行 + 2機能 × (見込量/実績2025/実績2024/比/変化率) = 12行
+    expect(rows).toHaveLength(12);
+    expect(rows[0]).toBe('R7,01,北海道,21,yoy,病床機能報告の報告率,報告率2024（R6公表）,2024,0.958,割合,');
+    expect(rows[2]).toBe('R7,01,北海道,21,yoy,合計,見込量2025（R6公表）,2025,76000,床,');
+    expect(rows[3]).toBe('R7,01,北海道,21,yoy,合計,実績2025（R7公表）,2025,78000,床,');
+    // 区域側と違い「R6を採用した」ではなく「R7と同じ値」と書く
+    expect(rows[4]).toBe(
+      'R7,01,北海道,21,yoy,合計,実績2024（R6公表）,2024,79000,床,R7公表分と同じ値（都道府県では両公表回が全て一致する）'
+    );
+    // 78000/76000 = 1.0263、78000/79000 = 0.9873
+    expect(rows[5]).toBe('R7,01,北海道,21,yoy,合計,比（実績2025/見込量2025）,,1.0263,,');
+    expect(rows[6]).toBe('R7,01,北海道,21,yoy,合計,変化率（実績2025/実績2024）,,0.9873,,');
+  });
+
+  it('omits dataset=yoy rows (and their caveat lines) when yoyEntry is null', () => {
+    const { text } = buildPrefectureDetailCsv({ ...detailArgs, yoyEntry: null });
+
+    expect(text).not.toContain(',yoy,');
+    expect(text).not.toContain('注記（年度間比較）');
+    expect(text).not.toContain('注記（2024年実績について）');
+    const dataLines = text.split('\r\n').filter((l) => l.startsWith('R7,01,'));
+    expect(dataLines).toHaveLength(16);
   });
 
   it('marks the bed ratio unavailable when need_2025 is 0, like the area-level detail CSV', () => {

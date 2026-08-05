@@ -28,6 +28,7 @@ import demandJson from './generated/area_demand.json';
 import yoyJson from './generated/area_yoy.json';
 import areaIndexJson from './generated/area_index.json';
 import prefectureIndicatorsJson from './generated/prefecture_indicators.json';
+import prefectureYoyJson from './generated/prefecture_yoy.json';
 import facilitySummaryJson from './generated/facility_summary.json';
 import downloadManifestJson from './generated/download_manifest.json';
 import type {
@@ -43,6 +44,7 @@ import type {
   MapLevel,
   MetricKind,
   PrefectureIndicatorsData,
+  PrefectureYoyData,
 } from './types';
 
 // generated/area_indicators.json is a verbatim copy of
@@ -76,6 +78,13 @@ const areaIndexByCode = new Map(areaIndex.map((entry) => [entry.area_code, entry
 // NOT reuse the AreaIndicators*/AreaDemand* types — see the comment there).
 const prefectureIndicators = prefectureIndicatorsJson as unknown as PrefectureIndicatorsData;
 const prefectureByCode = new Map(prefectureIndicators.prefectures.map((p) => [p.pref_code, p]));
+
+// generated/prefecture_yoy.json is a verbatim copy of
+// data/processed/prefecture_yoy_R6_R7.json (tools/build_web_prefecture_yoy.py).
+// 区域側の area_yoy.json と指標の定義は同一だが、エンティティが pref_code で
+// 全国が national キーに分かれているため型は別（types.ts の PrefectureYoyData）。
+const prefectureYoy = prefectureYoyJson as unknown as PrefectureYoyData;
+const prefectureYoyByCode = new Map(prefectureYoy.prefectures.map((p) => [p.pref_code, p]));
 
 // 都道府県のbboxは pref_map.json 側にあるが、地図の読み込み状態に依存せず
 // 「県を選んで区域表示へ降りる」を成立させるため、区域と同じくバンドル済み
@@ -202,6 +211,11 @@ export default function App() {
   const selectedPrefecture = useMemo(() => {
     if (!selectedPrefCode) return null;
     return prefectureByCode.get(selectedPrefCode) ?? null;
+  }, [selectedPrefCode]);
+
+  const selectedPrefectureYoy = useMemo(() => {
+    if (!selectedPrefCode) return null;
+    return prefectureYoyByCode.get(selectedPrefCode) ?? null;
   }, [selectedPrefCode]);
 
   // 医療機関shardは選択中の区域1本だけを取得する(339区域ぶんをバンドルしない)。
@@ -348,7 +362,13 @@ export default function App() {
   const handleDownloadTable = useCallback(() => {
     const { filename, text } =
       level === 'pref'
-        ? buildPrefectureTableCsv({ prefectures: prefectureIndicators, metric, bedFunction, year: selectedYear })
+        ? buildPrefectureTableCsv({
+            prefectures: prefectureIndicators,
+            prefectureYoy,
+            metric,
+            bedFunction,
+            year: selectedYear,
+          })
         : buildAreaTableCsv({ indicators, demand, yoy, metric, bedFunction, year: selectedYear });
     triggerDownload(filename, text);
   }, [level, metric, bedFunction, selectedYear]);
@@ -359,6 +379,8 @@ export default function App() {
     const { filename, text } = buildPrefectureDetailCsv({
       prefecture: selectedPrefecture,
       metadata: prefectureIndicators.metadata,
+      yoyEntry: selectedPrefectureYoy,
+      yoyMetadata: prefectureYoy.metadata,
       functions: prefectureIndicators.functions,
       functionLabels: prefectureIndicators.function_labels,
       demandCategories: prefectureIndicators.categories,
@@ -368,7 +390,7 @@ export default function App() {
       baselineYear: prefectureIndicators.baseline_year,
     });
     triggerDownload(filename, text);
-  }, [selectedPrefecture]);
+  }, [selectedPrefecture, selectedPrefectureYoy]);
 
   // 選択中の区域1つの指標をCSVにする(AreaPanel「この区域の指標をCSV」)。
   const handleDownloadAreaDetail = useCallback(() => {
@@ -490,6 +512,7 @@ export default function App() {
                 demandYears={prefectureIndicators.years}
                 demandYearLabels={prefectureIndicators.year_labels}
                 demandBaselineYear={prefectureIndicators.baseline_year}
+                yoyEntry={selectedPrefectureYoy}
                 onDrillDown={handleDrillDownToAreas}
                 onDownloadDetail={handleDownloadPrefectureDetail}
               />
@@ -549,6 +572,7 @@ export default function App() {
             yoyMetadata={yoy.metadata}
             flowMetadata={flowData?.metadata ?? null}
             prefectureMetadata={prefectureIndicators.metadata}
+            prefectureYoyMetadata={prefectureYoy.metadata}
           />
         </aside>
       </div>

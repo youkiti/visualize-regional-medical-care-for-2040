@@ -95,3 +95,5 @@ npm run dev
 - [x] Excel パーサ: 患者の流入率・流出率（`tools/parse_patient_flow.py` → `data/processed/patient_flow*.csv`）と、区域パネル・地図での可視化
 - [x] 都道府県階層（概観レイヤ）: `tools/build_prefecture_boundaries.py`・`tools/build_web_prefecture.py` と、表示単位トグル（都道府県／構想区域）
 - [x] R6公表分の①②を出力対象化し、R6→R7の年度間比較を検証・実装（`tools/verify_yoy_R6_R7.py` → [doc/YOY_VERIFICATION.md](doc/YOY_VERIFICATION.md)、`tools/build_web_yoy.py` → `data/processed/area_yoy_R6_R7.json`、画面に「公表年度間の比較（R6→R7）」として追加）
+- [x] 都道府県ぶんの絞り込みCSV（地図に表示中の指標を全47都道府県ぶん／選択都道府県1つの詳細）
+- [x] 都道府県層の年度間比較（`tools/build_web_prefecture_yoy.py` → `data/processed/prefecture_yoy_R6_R7.json`。表示単位トグルが全指標で成立）

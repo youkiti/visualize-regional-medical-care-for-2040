@@ -1,5 +1,5 @@
 import AreaSearch from './AreaSearch';
-import { isDemandMetric, isYoyMetric } from '../lib/metrics';
+import { isDemandMetric } from '../lib/metrics';
 import type {
   AreaIndicator,
   BedFunctionKey,
@@ -81,10 +81,6 @@ export default function Controls({
   onYearIndexChange,
 }: ControlsProps) {
   const demandSelected = isDemandMetric(metric);
-  // 都道府県層には年度間比較（R6→R7）のデータセットが無いため、この組み合わせ
-  // だけCSVを出せない（地図も同じ理由で全県「算出不可」になる）。339区域ぶんを
-  // 代わりに出すと「表示中のデータ」と中身が食い違うので、出さずに理由を示す。
-  const yoyUnavailableAtPref = level === 'pref' && isYoyMetric(metric);
   const currentYear = years[yearIndex];
   const currentYearLabel = yearLabels[String(currentYear)] ?? String(currentYear);
 
@@ -187,13 +183,10 @@ export default function Controls({
         <button
           type="button"
           onClick={onDownloadTable}
-          disabled={yoyUnavailableAtPref}
           title={
-            yoyUnavailableAtPref
-              ? '年度間比較（R6→R7）は都道府県層のデータセットを作っていないため、この組み合わせではCSVを出せません（表示単位を構想区域に切り替えてください）'
-              : level === 'pref'
-                ? '地図に表示中の指標（現在の病床機能・指標・年度）を、全47都道府県ぶんCSVでダウンロードします（全国は含みません）'
-                : '地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします'
+            level === 'pref'
+              ? '地図に表示中の指標（現在の病床機能・指標・年度）を、全47都道府県ぶんCSVでダウンロードします（全国は含みません）'
+              : '地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします'
           }
         >
           {level === 'pref' ? '表示中のデータをCSV（47都道府県）' : '表示中のデータをCSV（339区域）'}
