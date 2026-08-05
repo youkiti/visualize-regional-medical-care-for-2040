@@ -346,7 +346,7 @@ export interface FacilitySummaryData {
 // summary of a data/processed/*_R7.json source of truth like those are; it
 // describes two independently-built build artifacts (the ZIP bundle under
 // web/public/downloads/ and the standalone boundaries GeoJSON copy) plus the
-// 13 CSVs packed into the ZIP, so its shape has nothing in common with the
+// 15 CSVs packed into the ZIP, so its shape has nothing in common with the
 // others (no `source`/`processing`/`known_issues` metadata block at all).
 
 /** download_manifest.json の `bundle`: 加工済みCSV一括ダウンロードZIP本体の説明。 */
@@ -356,7 +356,7 @@ export interface DownloadManifestBundle {
   sha256: string;
   /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
   entry_count: number;
-  /** ZIP内のCSV本数（13）。entry_countとは別に持つ: UIの「CSV13本＋…」表記に使う。 */
+  /** ZIP内のCSV本数（15）。entry_countとは別に持つ: UIの「CSV15本＋…」表記に使う。 */
   csv_count: number;
 }
 
@@ -380,4 +380,89 @@ export interface DownloadManifest {
   bundle: DownloadManifestBundle;
   boundaries: DownloadManifestBoundaries;
   members: DownloadManifestMember[];
+}
+
+// ---- Patient flow (area_flow_R7.json / public/flow/area_flow.json) --------
+//
+// Mirrors data/processed/area_flow_R7.json (tools/build_web_flow.py). Fetched
+// on demand (web/src/lib/flowData.ts), not bundled — see the design note in
+// web/scripts/sync-data.mjs's "5b. web/public/flow/area_flow.json" step.
+// Deliberately NOT reusing AreaIndicators*/AreaDemand*/FacilitySummary* above
+// (CLAUDE.md 罠11 — a new 表示用JSON never matches an existing metadata
+// shape): here `source_sheet` is an array (2 sheets: 流入率/流出率, like
+// AreaDemandSource) but `original_title` is a single string (unlike
+// AreaDemandSource, where it's an array) — yet another distinct combination,
+// confirmed against the actual generated JSON rather than assumed from a
+// sibling type. `processing.caveat` is an object keyed by the two input CSVs
+// (patient_flow/patient_flow_total), matching neither AreaIndicatorsProcessing
+// (single string) nor AreaDemandProcessing's two keys (different names).
+
+export type FlowDirectionKey = 'inflow' | 'outflow';
+export type FlowPhaseKey = 'acute' | 'comprehensive' | 'chronic';
+
+export const FLOW_DIRECTIONS: FlowDirectionKey[] = ['inflow', 'outflow'];
+export const FLOW_PHASES: FlowPhaseKey[] = ['acute', 'comprehensive', 'chronic'];
+
+/** [相手区域コード, 率(0〜1)] のタプル。率の降順・自区域を除く（build_web_flow.pyが保証）。 */
+export type FlowPartner = [string, number];
+
+export interface FlowPhaseGroup {
+  /** 自区域内完結の率。原典に自区域行が無いグループはself_rankとともにnull（12グループで実際にnull）。 */
+  self_rate: number | null;
+  /** self_rateの構想区域内の順位(1始まり)。self_rateがnullのときは同様にnull。 */
+  self_rank: number | null;
+  partners: FlowPartner[];
+  /** このグループ内でvalue_status=='error'（原典のExcelエラー値'#VALUE!'）だった行数。0または1。 */
+  value_error_count: number;
+}
+
+export interface AreaFlowEntry {
+  area_code: string;
+  flows: Record<FlowDirectionKey, { overall_rate: number; phases: Record<FlowPhaseKey, FlowPhaseGroup> }>;
+}
+
+export interface AreaFlowSource {
+  name: string;
+  publisher: string;
+  url: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  /** 配列（原典シートが2枚: 流入率・流出率）。AreaDemandSource.source_sheetと同形。 */
+  source_sheet: string[];
+  acquired_date: string;
+  license: string;
+  /** 単一文字列（AreaDemandSource.original_titleは配列だが、こちらは違う — 罠11参照）。 */
+  original_title: string;
+  original_notes: string[];
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+export interface AreaFlowProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 入力CSV2本ぶんのcaveat（AreaIndicatorsProcessing.caveatの単一文字列とも
+   * AreaDemandProcessing.caveatの2キー(demand_forecast/demand_population)とも
+   * キー名が異なる）。 */
+  caveat: { patient_flow: string; patient_flow_total: string };
+}
+
+export interface AreaFlowMetadata {
+  title: string;
+  source: AreaFlowSource;
+  processing: AreaFlowProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface AreaFlowData {
+  metadata: AreaFlowMetadata;
+  directions: FlowDirectionKey[];
+  direction_labels: Record<FlowDirectionKey, string>;
+  phases: FlowPhaseKey[];
+  phase_labels: Record<FlowPhaseKey, string>;
+  /** 339構想区域の配列（area_code昇順）。 */
+  areas: AreaFlowEntry[];
 }

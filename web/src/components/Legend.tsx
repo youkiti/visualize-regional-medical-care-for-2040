@@ -7,6 +7,7 @@ import {
   formatInteger,
   isDemandMetric,
 } from '../lib/metrics';
+import { FLOW_BIN_COLORS, FLOW_BIN_LABELS, type FlowOverlay } from '../lib/flowMap';
 import type { MetricKind } from '../types';
 
 interface LegendProps {
@@ -18,6 +19,8 @@ interface LegendProps {
   demandYearLabel: string;
   /** 区域選択中（＝地図に医療機関ポイントを表示しうる状態）かどうか。trueのときだけ末尾に凡例を1行足す。 */
   showFacilityNote: boolean;
+  /** 患者の流入・流出オーバーレイ(App.tsx、D2)。非nullのとき、指標の凡例の代わりにこちらを出す。 */
+  flowOverlay: FlowOverlay | null;
 }
 
 const METRIC_TITLES: Record<MetricKind, string> = {
@@ -28,21 +31,41 @@ const METRIC_TITLES: Record<MetricKind, string> = {
   demand_outpatient: '外来需要の2024年度比',
 };
 
-export default function Legend({ metric, functionLabel, quantileEdges, demandYearLabel, showFacilityNote }: LegendProps) {
+export default function Legend({ metric, functionLabel, quantileEdges, demandYearLabel, showFacilityNote, flowOverlay }: LegendProps) {
   // computeQuantileEdges() の生の8値は同値を含みうる(例: 高度急性期の実績
   // 病床数は339区域中69区域が0床)。地図の塗り分けと凡例の区分を必ず一致させる
   // ため、両方とも同じ computeSequentialClasses() から重複を除いた境界と、
   // それに合わせて間引いた色を取得する。実数指標(actual/need)のときのみ使う。
   const sequential = metric === 'ratio' || isDemandMetric(metric) ? null : computeSequentialClasses(quantileEdges);
 
-  const title = isDemandMetric(metric)
-    ? `${METRIC_TITLES[metric]}（${demandYearLabel}）`
-    : `${METRIC_TITLES[metric]}（${functionLabel}）`;
+  const title = flowOverlay
+    ? `患者の${flowOverlay.directionLabel}の構成比（${flowOverlay.areaName}・${flowOverlay.phaseLabel}）`
+    : isDemandMetric(metric)
+      ? `${METRIC_TITLES[metric]}（${demandYearLabel}）`
+      : `${METRIC_TITLES[metric]}（${functionLabel}）`;
 
   return (
     <div className="legend" aria-label="凡例">
       <h3>{title}</h3>
-      {metric === 'ratio' ? (
+      {flowOverlay ? (
+        <>
+          {FLOW_BIN_COLORS.map((color, i) => (
+            <div className="legend-row" key={color}>
+              <span className="legend-swatch" style={{ background: color }} />
+              <span>{FLOW_BIN_LABELS[i]}</span>
+            </div>
+          ))}
+          <div className="legend-row">
+            <span className="legend-swatch legend-swatch-unavailable" />
+            <span>原典で非表示（0%とは限りません）</span>
+          </div>
+          <p className="legend-note">
+            ※ 太枠が選択中の区域です。
+            <br />
+            ※ 色の区分は固定（区域を切り替えても閾値は変わりません）。
+          </p>
+        </>
+      ) : metric === 'ratio' ? (
         <>
           {RATIO_BIN_COLORS.map((color, i) => (
             <div className="legend-row" key={color}>

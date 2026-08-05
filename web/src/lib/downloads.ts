@@ -14,6 +14,8 @@ import type {
   AreaDemandArea,
   AreaDemandData,
   AreaDemandMetadata,
+  AreaFlowEntry,
+  AreaFlowMetadata,
   AreaIndicator,
   AreaIndicatorsData,
   AreaIndicatorsMetadata,
@@ -25,6 +27,8 @@ import type {
   FacilityShard,
   FacilitySummaryMetadata,
   FacilityValueStatus,
+  FlowDirectionKey,
+  FlowPhaseKey,
   MetricKind,
 } from '../types';
 
@@ -467,5 +471,95 @@ export function buildFacilityCsv(args: BuildFacilityCsvArgs): DownloadCsv {
   return {
     filename: `area_${shard.area_code}_facilities_R7.csv`,
     text: toCsvText(FACILITY_HEADER, rows, { preamble }),
+  };
+}
+
+// ---- 2-4. buildAreaFlowCsv: 選択区域1つ・方向1つ・区分1つの流入出内訳 -------
+
+const FLOW_HEADER = [
+  'area_code',
+  'area_name',
+  'direction',
+  'phase',
+  'rank',
+  'partner_area_code',
+  'partner_pref_name',
+  'partner_area_name',
+  'rate',
+];
+
+const FLOW_TRUNCATION_CAVEAT =
+  '原典は一定数以上の患者がいる区域のみ表示するため、rateの合計は1になりません（表示されていない分は算出できません）';
+const FLOW_OVERALL_CAVEAT_LINE = '注記（全体値について）: 全体の流入率・流出率は3区分の合計ではありません';
+
+export interface BuildAreaFlowCsvArgs {
+  area: AreaIndicator;
+  flowEntry: AreaFlowEntry;
+  direction: FlowDirectionKey;
+  phase: FlowPhaseKey;
+  directionLabels: Record<FlowDirectionKey, string>;
+  phaseLabels: Record<FlowPhaseKey, string>;
+  flowMetadata: AreaFlowMetadata;
+  /** 相手区域の名前・都道府県名を引くための一覧（area_indicators.json由来）。 */
+  areas: AreaIndicator[];
+}
+
+/**
+ * 選択区域1つ・方向1つ・区分1つの流入出内訳を、原典の並び（率の降順）を復元した
+ * 形で出す。self_rank!==null のときは、長さ partners.length+1 の配列を作り、
+ * self_rank-1 の位置へ自区域の行を挿し込み、残りの位置へ partners（自区域を
+ * 除いた原典順）を順に詰める。self_rank===null のときは partners をそのまま
+ * 1..N とする（AreaFlowEntry.partners は既に自区域を除く率降順で保持されている
+ * ため、詰め直すだけで原典の行位置が正確に再現できる — types.tsのFlowPartner
+ * のコメント参照）。
+ */
+export function buildAreaFlowCsv(args: BuildAreaFlowCsvArgs): DownloadCsv {
+  const { area, flowEntry, direction, phase, directionLabels, phaseLabels, flowMetadata, areas } = args;
+  const areaByCode = new Map(areas.map((a) => [a.area_code, a]));
+  const group = flowEntry.flows[direction].phases[phase];
+  const { self_rate, self_rank, partners } = group;
+
+  const hasSelfRow = self_rank !== null && self_rate !== null;
+  const total = partners.length + (hasSelfRow ? 1 : 0);
+  const slots: Array<{ code: string; rate: number } | null> = new Array(total).fill(null);
+  if (hasSelfRow) {
+    slots[self_rank - 1] = { code: area.area_code, rate: self_rate };
+  }
+  let partnerIdx = 0;
+  for (let i = 0; i < total; i++) {
+    if (slots[i] !== null) continue;
+    const partner = partners[partnerIdx++];
+    slots[i] = { code: partner[0], rate: partner[1] };
+  }
+
+  const rows: CsvValue[][] = slots.map((slot, i) => {
+    if (!slot) {
+      throw new Error(`buildAreaFlowCsv: slot ${i} unfilled (self_rank/partners inconsistent with group data)`);
+    }
+    const partnerArea = areaByCode.get(slot.code);
+    return [
+      area.area_code,
+      area.area_name,
+      direction,
+      phase,
+      i + 1,
+      slot.code,
+      partnerArea?.pref_name ?? '',
+      partnerArea?.area_name ?? '',
+      slot.rate,
+    ];
+  });
+
+  const condition = `対象=構想区域 ${area.area_code} ${area.area_name}（${area.pref_name}）, 方向=${directionLabels[direction]}（${direction}）, 区分=${phaseLabels[phase]}（${phase}）`;
+  const preamble = buildPreamble({
+    source: flowMetadata.source,
+    condition,
+    caveat: FLOW_TRUNCATION_CAVEAT,
+    extraCaveatLines: [FLOW_OVERALL_CAVEAT_LINE],
+  });
+
+  return {
+    filename: `area_flow_${area.area_code}_${direction}_${phase}_R7.csv`,
+    text: toCsvText(FLOW_HEADER, rows, { preamble }),
   };
 }

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildAreaDetailCsv, buildAreaTableCsv, buildFacilityCsv } from './downloads';
+import { buildAreaDetailCsv, buildAreaFlowCsv, buildAreaTableCsv, buildFacilityCsv } from './downloads';
 import type {
   AreaDemandArea,
   AreaDemandData,
+  AreaFlowEntry,
+  AreaFlowMetadata,
   AreaIndicator,
   AreaIndicatorsData,
   BedFunctionKey,
@@ -11,6 +13,9 @@ import type {
   FacilityShard,
   FacilitySummaryMetadata,
   FacilityValueStatus,
+  FlowDirectionKey,
+  FlowPhaseGroup,
+  FlowPhaseKey,
 } from '../types';
 
 // 小さなインラインフィクスチャのみを使う。src/generated/* はnpm run sync-data
@@ -538,5 +543,161 @@ describe('buildFacilityCsv', () => {
     expect(text).toContain('注記: facility_observationsの注記');
     expect(text).toContain('注記（座標）: facility_geo_linkageの注記');
     expect(text).toContain('出力条件: 対象=構想区域 0101 南渡島（北海道）の医療機関 1件 × 3指標');
+  });
+});
+
+// ---- buildAreaFlowCsv -------------------------------------------------------
+
+const FLOW_DIRECTION_LABELS: Record<FlowDirectionKey, string> = { inflow: '流入率', outflow: '流出率' };
+const FLOW_PHASE_LABELS: Record<FlowPhaseKey, string> = {
+  acute: '高度急性期+急性期',
+  comprehensive: '包括期',
+  chronic: '慢性期',
+};
+
+const FLOW_METADATA: AreaFlowMetadata = {
+  title: 'test-flow',
+  source: {
+    name: '④構想区域の流出率及び流入率（別添５）',
+    publisher: '厚生労働省',
+    url: 'https://example.test/001723366.xlsx',
+    page_url: 'https://example.test/flow-page',
+    fiscal_year: '令和7年度（2025年度）',
+    source_file: 'R7/001723366.xlsx',
+    source_sha256: 'dddd',
+    source_sheet: ['流入率', '流出率'],
+    acquired_date: '2026-08-04',
+    license: 'テスト利用規約',
+    original_title: '流入率・流出率',
+    original_notes: [],
+    derived_via: [],
+  },
+  processing: {
+    script: 'tools/build_web_flow.py',
+    inputs: [],
+    steps: [],
+    caveat: {
+      patient_flow: '流入率・流出率の注記',
+      patient_flow_total: '全体値の注記',
+    },
+  },
+  fields: {},
+  known_issues: [],
+};
+
+const EMPTY_FLOW_GROUP: FlowPhaseGroup = { self_rate: null, self_rank: null, partners: [], value_error_count: 0 };
+
+function makeFlowEntry(direction: FlowDirectionKey, phase: FlowPhaseKey, group: FlowPhaseGroup): AreaFlowEntry {
+  const emptyPhases = { acute: EMPTY_FLOW_GROUP, comprehensive: EMPTY_FLOW_GROUP, chronic: EMPTY_FLOW_GROUP };
+  const emptyDirection = { overall_rate: 0, phases: emptyPhases };
+  return {
+    area_code: '0101',
+    flows: {
+      inflow: direction === 'inflow' ? { overall_rate: 0.05, phases: { ...emptyPhases, [phase]: group } } : emptyDirection,
+      outflow:
+        direction === 'outflow' ? { overall_rate: 0.033216957073430975, phases: { ...emptyPhases, [phase]: group } } : emptyDirection,
+    },
+  };
+}
+
+describe('buildAreaFlowCsv', () => {
+  const area = makeIndicatorsArea(); // area_code '0101', area_name '南渡島', pref_code '01', pref_name '北海道'
+  const area0103 = makeIndicatorsArea({ area_code: '0103', area_name: '渡島西部' });
+  const area0104 = makeIndicatorsArea({ area_code: '0104', area_name: '桧山' });
+  const areas = [area, area0103, area0104];
+
+  it('reconstructs the source row order, inserting the self row at self_rank when self_rank >= 2', () => {
+    const group: FlowPhaseGroup = {
+      self_rate: 0.123456789,
+      self_rank: 2,
+      partners: [
+        ['0104', 0.3],
+        ['0103', 0.05],
+      ],
+      value_error_count: 0,
+    };
+    const flowEntry = makeFlowEntry('outflow', 'chronic', group);
+
+    const { filename, text } = buildAreaFlowCsv({
+      area,
+      flowEntry,
+      direction: 'outflow',
+      phase: 'chronic',
+      directionLabels: FLOW_DIRECTION_LABELS,
+      phaseLabels: FLOW_PHASE_LABELS,
+      flowMetadata: FLOW_METADATA,
+      areas,
+    });
+
+    expect(filename).toBe('area_flow_0101_outflow_chronic_R7.csv');
+
+    const lines = text.split('\r\n');
+    const headerLine = lines.find((l) => l.startsWith('area_code,'))!;
+    expect(headerLine).toBe(
+      'area_code,area_name,direction,phase,rank,partner_area_code,partner_pref_name,partner_area_name,rate'
+    );
+
+    // rank1: 最初のpartner(0104)、rank2: 自区域(self_rank=2の位置)、rank3: 2番目のpartner(0103)
+    const dataLines = lines.filter((l) => l.startsWith('0101,南渡島,outflow,chronic,'));
+    expect(dataLines).toHaveLength(3);
+    expect(dataLines[0]).toBe('0101,南渡島,outflow,chronic,1,0104,北海道,桧山,0.3');
+    // 自区域行は生値(丸めない)のまま出る
+    expect(dataLines[1]).toBe('0101,南渡島,outflow,chronic,2,0101,北海道,南渡島,0.123456789');
+    expect(dataLines[2]).toBe('0101,南渡島,outflow,chronic,3,0103,北海道,渡島西部,0.05');
+  });
+
+  it('numbers partners 1..N with no self row when self_rank is null (自区域行なしのグループ)', () => {
+    const group: FlowPhaseGroup = {
+      self_rate: null,
+      self_rank: null,
+      partners: [
+        ['0102', 0.4],
+        ['0103', 0.1],
+      ],
+      value_error_count: 1,
+    };
+    // 0102は未定義areaでも(名前解決できなくても)行は出す
+    const flowEntry = makeFlowEntry('inflow', 'chronic', group);
+
+    const { text } = buildAreaFlowCsv({
+      area,
+      flowEntry,
+      direction: 'inflow',
+      phase: 'chronic',
+      directionLabels: FLOW_DIRECTION_LABELS,
+      phaseLabels: FLOW_PHASE_LABELS,
+      flowMetadata: FLOW_METADATA,
+      areas,
+    });
+
+    const lines = text.split('\r\n');
+    const dataLines = lines.filter((l) => l.startsWith('0101,南渡島,inflow,chronic,'));
+    expect(dataLines).toHaveLength(2);
+    expect(dataLines[0]).toBe('0101,南渡島,inflow,chronic,1,0102,,,0.4');
+    expect(dataLines[1]).toBe('0101,南渡島,inflow,chronic,2,0103,北海道,渡島西部,0.1');
+  });
+
+  it('embeds the source SHA-256/page URL and both truncation notes in the preamble', () => {
+    const group: FlowPhaseGroup = { self_rate: 0.9, self_rank: 1, partners: [], value_error_count: 0 };
+    const flowEntry = makeFlowEntry('outflow', 'acute', group);
+
+    const { text } = buildAreaFlowCsv({
+      area,
+      flowEntry,
+      direction: 'outflow',
+      phase: 'acute',
+      directionLabels: FLOW_DIRECTION_LABELS,
+      phaseLabels: FLOW_PHASE_LABELS,
+      flowMetadata: FLOW_METADATA,
+      areas,
+    });
+
+    expect(text).toContain('原典ファイル: R7/001723366.xlsx（SHA-256: dddd）');
+    expect(text).toContain('掲載ページ: https://example.test/flow-page');
+    expect(text).toContain('出力条件: 対象=構想区域 0101 南渡島（北海道）, 方向=流出率（outflow）, 区分=高度急性期+急性期（acute）');
+    expect(text).toContain(
+      '注記: 原典は一定数以上の患者がいる区域のみ表示するため、rateの合計は1になりません（表示されていない分は算出できません）'
+    );
+    expect(text).toContain('注記（全体値について）: 全体の流入率・流出率は3区分の合計ではありません');
   });
 });

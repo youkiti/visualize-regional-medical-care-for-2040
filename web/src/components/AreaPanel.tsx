@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
 import FacilityList from './FacilityList';
+import FlowPanel from './FlowPanel';
 import {
   computeRatio,
   formatChangeRatio,
@@ -12,14 +13,18 @@ import {
   formatReceipts,
 } from '../lib/metrics';
 import type { FacilityShardStatus } from '../lib/facilityShard';
+import type { FlowDataStatus } from '../lib/flowData';
 import type {
   AreaDemandArea,
+  AreaFlowEntry,
   AreaIndicator,
   BedFunctionKey,
   DemandCategoryKey,
   Facility,
   FacilityMetric,
   FacilityValueStatus,
+  FlowDirectionKey,
+  FlowPhaseKey,
 } from '../types';
 
 interface AreaPanelProps {
@@ -48,6 +53,25 @@ interface AreaPanelProps {
   onDownloadAreaDetail: () => void;
   /** この区域の医療機関一覧をCSVでダウンロードする（lib/downloads.ts buildFacilityCsv）。FacilityListへそのまま渡す。 */
   onDownloadFacilities: () => void;
+  /** useFlowData(App.tsx)の取得結果。区域を選ぶまでidle/loadingのままFlowPanelへそのまま渡す。 */
+  flowStatus: FlowDataStatus;
+  /** area_flow.jsonから area_code で引いた選択区域のエントリ。取得前/失敗時/該当なしはnull。 */
+  flowEntry: AreaFlowEntry | null;
+  flowError: string | null;
+  onRetryFlow: () => void;
+  flowDirection: FlowDirectionKey;
+  flowPhase: FlowPhaseKey;
+  onFlowDirectionChange: (direction: FlowDirectionKey) => void;
+  onFlowPhaseChange: (phase: FlowPhaseKey) => void;
+  flowDirectionLabels: Record<FlowDirectionKey, string>;
+  flowPhaseLabels: Record<FlowPhaseKey, string>;
+  /** 相手区域の名前・都道府県名を引くための一覧（area_indicators.json由来）。FlowPanelへそのまま渡す。 */
+  indicatorAreas: AreaIndicator[];
+  /** 選択中の方向・区分の流入出内訳をCSVでダウンロードする（lib/downloads.ts buildAreaFlowCsv）。FlowPanelへそのまま渡す。 */
+  onDownloadFlow: () => void;
+  /** 地図に「相手区域のコロプレス」オーバーレイを表示中か（App.tsxのstate）。FlowPanelの「この内訳を地図に表示」トグルへそのまま渡す。 */
+  flowMapEnabled: boolean;
+  onToggleFlowMap: () => void;
 }
 
 export default function AreaPanel({
@@ -70,6 +94,20 @@ export default function AreaPanel({
   facilityValueStatusLabels,
   onDownloadAreaDetail,
   onDownloadFacilities,
+  flowStatus,
+  flowEntry,
+  flowError,
+  onRetryFlow,
+  flowDirection,
+  flowPhase,
+  onFlowDirectionChange,
+  onFlowPhaseChange,
+  flowDirectionLabels,
+  flowPhaseLabels,
+  indicatorAreas,
+  onDownloadFlow,
+  flowMapEnabled,
+  onToggleFlowMap,
 }: AreaPanelProps) {
   const isSyntheticBoundary = boundarySource != null && boundarySource.includes('三重県');
 
@@ -202,6 +240,24 @@ export default function AreaPanel({
       ) : (
         <p className="area-panel-placeholder">この区域の医療需要推計データが見つかりません。</p>
       )}
+
+      <FlowPanel
+        area={area}
+        status={flowStatus}
+        entry={flowEntry}
+        error={flowError}
+        onRetry={onRetryFlow}
+        direction={flowDirection}
+        phase={flowPhase}
+        onDirectionChange={onFlowDirectionChange}
+        onPhaseChange={onFlowPhaseChange}
+        directionLabels={flowDirectionLabels}
+        phaseLabels={flowPhaseLabels}
+        indicatorAreas={indicatorAreas}
+        onDownloadFlow={onDownloadFlow}
+        flowMapEnabled={flowMapEnabled}
+        onToggleFlowMap={onToggleFlowMap}
+      />
 
       {/* keyにarea_codeを指定して区域切替のたびに再マウントさせることで、
           FacilityList内部の行展開状態(useState)を自動でリセットする
