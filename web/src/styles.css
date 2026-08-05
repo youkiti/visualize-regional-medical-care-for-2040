@@ -437,10 +437,14 @@ a {
   min-width: 0;
 }
 
-.panel-section-summary-inner h3 {
-  /* 罫線はsummary行(上記)が持つため、既存の.side-panel h3側の下線・下余白は
-     ここで打ち消す。見出しレベル(h3)自体はスクリーンリーダーの見出し一覧を
-     壊さないよう維持する。 */
+/* 罫線はsummary行(上記)が持つため、既存の.side-panel h3側の下線・下余白は
+   ここで打ち消す。見出しレベル(h3)自体はスクリーンリーダーの見出し一覧を
+   壊さないよう維持する。
+   セレクタに .side-panel を含めているのは詳細度のため: `.panel-section-summary-inner h3`
+   だけだと .side-panel h3 と同一詳細度(0,1,1)になり、後に書かれている
+   .side-panel h3 が勝って打ち消しが効かない。実機で「見出しの文字幅ぶんの下線」と
+   「summary行の全幅の罫線」が二重に出て発覚した(tsc・vitest・vite buildは検出しない)。 */
+.side-panel .panel-section-summary-inner h3 {
   margin: 0;
   border-bottom: none;
   padding-bottom: 0;
@@ -723,6 +727,13 @@ tr.demand-row-baseline {
   border-bottom: 1px solid var(--color-rule);
   padding-bottom: 4px;
   margin-bottom: 8px;
+  /* summary の list-style-position は HTML 標準の推奨レンダリングが `inside` を
+     指定しているため、既定のままだとマーカー(開閉三角)が行内ボックスとして先頭に
+     入る。その直後がブロックレベルの flex コンテナ(.source-block-summary-inner)
+     なので、マーカーだけが1行を占め、ラベルが次の行へ落ちる。.panel-section 側と
+     同じく `outside` にしてマーカーを行の左へ逃がす（実機で発覚。summaryの高さが
+     47px対36pxになっていた）。 */
+  list-style-position: outside;
 }
 
 .source-block-summary-inner {
