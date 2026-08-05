@@ -1,9 +1,10 @@
-import type { AreaDemandMetadata, AreaIndicatorsMetadata, FacilitySummaryMetadata, KnownIssue } from '../types';
+import type { AreaDemandMetadata, AreaIndicatorsMetadata, AreaYoyMetadata, FacilitySummaryMetadata, KnownIssue } from '../types';
 
 interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
   facilityMetadata: FacilitySummaryMetadata;
+  yoyMetadata: AreaYoyMetadata;
 }
 
 /**
@@ -33,7 +34,7 @@ function KnownIssues({ issues, label }: { issues: KnownIssue[]; label: string })
   );
 }
 
-export default function SourceNotes({ metadata, demandMetadata, facilityMetadata }: SourceNotesProps) {
+export default function SourceNotes({ metadata, demandMetadata, facilityMetadata, yoyMetadata }: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
   const demandSource = demandMetadata.source;
   // AreaDemandProcessing.caveat is an object with 2 keys (demand_forecast/
@@ -50,6 +51,13 @@ export default function SourceNotes({ metadata, demandMetadata, facilityMetadata
   const facilitySource = facilityMetadata.source;
   const geoLinkageSource = facilityMetadata.geo_linkage_source;
   const facilityCaveat = facilityMetadata.processing.caveat;
+
+  // 年度間比較(R6→R7)のうち「2024年実績はR6公表分を採用した」という判断は
+  // known_issuesの1件として記録されている(area_yoy_2024_actual_from_r6)。
+  // ハードコードせずそこから文言を取り、caveat（見込量2025の公表回が異なる旨を
+  // 含む）と並べて必ず見える形で表示する（briefの「次の2つの注記」要件）。
+  const yoyActualFromR6Issue =
+    yoyMetadata.known_issues.find((issue) => issue.id === 'area_yoy_2024_actual_from_r6') ?? null;
 
   return (
     <section className="source-notes" aria-label="出典・注記">
@@ -204,6 +212,53 @@ export default function SourceNotes({ metadata, demandMetadata, facilityMetadata
       </dl>
 
       <KnownIssues issues={facilityMetadata.known_issues} label="データの既知の問題（医療機関）" />
+
+      <h3>出典・注記（公表年度間の比較 R6→R7）</h3>
+
+      <p className="caveat">{yoyMetadata.processing.caveat}</p>
+      {yoyActualFromR6Issue && (
+        <p className="caveat">
+          <strong>2024年実績の採用について: </strong>
+          {yoyActualFromR6Issue.summary}
+          {typeof yoyActualFromR6Issue.action === 'string' && yoyActualFromR6Issue.action
+            ? `／対応: ${yoyActualFromR6Issue.action}`
+            : null}
+        </p>
+      )}
+
+      {/* metadata.sourceはR7・R6の2要素配列。source[0]だけ描画するとR6の出典が
+          画面から消えるため(罠11)、両方をmapで描画する。 */}
+      {yoyMetadata.source.map((s) => (
+        <dl key={s.published_fy}>
+          <dt>公表年度区分</dt>
+          <dd>{s.published_fy}公表分</dd>
+          <dt>データ名</dt>
+          <dd>{s.name}</dd>
+          <dt>公表元</dt>
+          <dd>{s.publisher}</dd>
+          <dt>公表年度</dt>
+          <dd>{s.fiscal_year}</dd>
+          <dt>ファイル</dt>
+          <dd>
+            <a href={s.url} target="_blank" rel="noreferrer">
+              {s.url}
+            </a>
+            {s.source_note ? `（${s.source_note}）` : ''}
+          </dd>
+          <dt>掲載ページ</dt>
+          <dd>
+            <a href={s.page_url} target="_blank" rel="noreferrer">
+              {s.page_url}
+            </a>
+          </dd>
+          <dt>取得日</dt>
+          <dd>{s.acquired_date}</dd>
+          <dt>利用規約</dt>
+          <dd>{s.license}</dd>
+        </dl>
+      ))}
+
+      <KnownIssues issues={yoyMetadata.known_issues} label="データの既知の問題（公表年度間の比較）" />
     </section>
   );
 }

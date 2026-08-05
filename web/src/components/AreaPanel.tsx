@@ -10,11 +10,15 @@ import {
   formatPercent,
   formatRatio,
   formatReceipts,
+  formatReportRate,
+  formatYoyChangeRatio,
+  formatYoyRatio,
 } from '../lib/metrics';
 import type { FacilityShardStatus } from '../lib/facilityShard';
 import type {
   AreaDemandArea,
   AreaIndicator,
+  AreaYoyArea,
   BedFunctionKey,
   DemandCategoryKey,
   Facility,
@@ -30,6 +34,9 @@ interface AreaPanelProps {
   /** area_demand.json から area_code で引いた当該区域の需要データ。339区域全件に
    * 存在するはずだが(sync-data.mjsが突合検証済み)、型上は見つからない場合に備える。 */
   demandArea: AreaDemandArea | null;
+  /** area_yoy.json から area_code で引いた当該区域の年度間比較データ(R6→R7)。
+   * demandArea同様339区域全件に存在するはずだが、型上は見つからない場合に備える。 */
+  yoyArea: AreaYoyArea | null;
   demandCategories: DemandCategoryKey[];
   demandCategoryLabels: Record<DemandCategoryKey, string>;
   demandYears: number[];
@@ -56,6 +63,7 @@ export default function AreaPanel({
   functions,
   functionLabels,
   demandArea,
+  yoyArea,
   demandCategories,
   demandCategoryLabels,
   demandYears,
@@ -146,6 +154,23 @@ export default function AreaPanel({
             </li>
           </>
         )}
+        {/* 報告率は年間の病床数の変化に混ざりうるため、年度間比較の表とは別に
+            必ず併記する（339区域中105区域でR6とR7の2024年報告率が異なる。brief記載
+            どおり）。ラベルは「年」（原典どおり）— area_bed_report_rate.csvの
+            fieldsは「報告率の対象年(実績年のみ)」であり「年度」ではない
+            （CLAUDE.md、修正3）。 */}
+        {yoyArea && (
+          <>
+            <li>
+              <span>病床機能報告の報告率（2024年・R6公表）</span>
+              <span>{formatReportRate(yoyArea.report_rate_2024)}</span>
+            </li>
+            <li>
+              <span>病床機能報告の報告率（2025年・R7公表）</span>
+              <span>{formatReportRate(yoyArea.report_rate_2025)}</span>
+            </li>
+          </>
+        )}
       </ul>
 
       {/* 基準人口の年は厚生労働省の公表物どうしで食い違っている。どちらかを黙って
@@ -201,6 +226,52 @@ export default function AreaPanel({
         </table>
       ) : (
         <p className="area-panel-placeholder">この区域の医療需要推計データが見つかりません。</p>
+      )}
+
+      <h3 className="area-panel-subheading">年度間比較（R6→R7）</h3>
+      {yoyArea ? (
+        <>
+          <div className="yoy-table-wrap">
+            <table className="yoy-table">
+              <thead>
+                <tr>
+                  <th>病床機能</th>
+                  <th>見込量2025(R6)</th>
+                  <th>実績2025(R7)</th>
+                  <th>実績2024(R6)</th>
+                  <th>見込量比（実績2025÷見込量2025）</th>
+                  <th>前年比（実績2025÷実績2024）</th>
+                </tr>
+              </thead>
+              <tbody>
+                {functions.map((fn) => {
+                  const beds = yoyArea.beds[fn];
+                  const planRatio = computeRatio(beds.actual_2025, beds.plan_2025);
+                  const changeRatio = computeRatio(beds.actual_2025, beds.actual_2024);
+                  return (
+                    <tr key={fn}>
+                      <td>{functionLabels[fn]}</td>
+                      <td>{formatInteger(beds.plan_2025)}</td>
+                      <td>{formatInteger(beds.actual_2025)}</td>
+                      <td>{formatInteger(beds.actual_2024)}</td>
+                      <td>{formatYoyRatio(planRatio, 'yoy_plan_vs_actual')}</td>
+                      <td>{formatYoyChangeRatio(changeRatio, 'yoy_actual_change')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="population-basis-note">
+            ※ 「見込量比（実績2025÷見込量2025）」と「前年比（実績2025÷実績2024）」は別々の比較であり、
+            同じ量の2通りの見せ方ではない。見込量2025はR6公表時点の見込みで、実績2025（R7公表分）とは
+            公表回が異なる。実績2024はR6公表分を採用している（R7公表分の同列は2025年実績の複製という
+            既知の原典の欠陥があるため使用していない）。報告率が年により異なるため（上記参照）、
+            病床数の年間の変化には報告率の変動も混ざりうる。
+          </p>
+        </>
+      ) : (
+        <p className="area-panel-placeholder">この区域の年度間比較データが見つかりません。</p>
       )}
 
       {/* keyにarea_codeを指定して区域切替のたびに再マウントさせることで、

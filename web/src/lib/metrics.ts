@@ -3,7 +3,7 @@
 // the actual/need metrics, and display formatting. No React, no MapLibre —
 // keeps this file trivially unit-testable (see metrics.test.ts).
 
-import type { BedFunctionKey, BedMetricKind, DemandCategoryKey, DemandMetricKind, MetricKind } from '../types';
+import type { BedFunctionKey, BedMetricKind, DemandCategoryKey, DemandMetricKind, MetricKind, YoyMetricKind } from '../types';
 
 /**
  * 2025実績 ÷ 2025必要数。need=0 のときは「0でも∞でもない算出不可」を表すため
@@ -95,6 +95,63 @@ export function classifyDemandRatioBin(r: number): number {
   return classifyBin(r, DEMAND_RATIO_BIN_EDGES);
 }
 
+// ---- YoY (R6→R7 公表年度間比較) ratio classification -----------------------
+//
+// Fixed (not quantile) bin edges around 1.0, multiplicatively symmetric
+// (1/0.85≈1.18, 1/0.93≈1.075, 1/0.98≈1.02) so the two YoY metrics
+// (yoy_plan_vs_actual/yoy_actual_change) keep the same color meaning. Chosen
+// from the observed distribution in doc/YOY_VERIFICATION.md §6: with these
+// edges, both metrics and all 5 bed functions populate all 7 bins, and the
+// combined ('total') function's center bin holds 47% of areas. A coarser
+// candidate ([0.80, 0.90, 0.97, 1.03, 1.11, 1.25]) also populates all 7 bins
+// (no bin is empty at either tail) but puts 62% of areas in the center bin —
+// not enough resolution to distinguish areas near 1.0. Reuses RATIO_BIN_COLORS
+// (below/above 1.0 = blue/red), not a new palette.
+export const YOY_RATIO_BIN_EDGES = [0.85, 0.93, 0.98, 1.02, 1.075, 1.18] as const;
+
+export const YOY_RATIO_BIN_LABELS = [
+  '-15%未満',
+  '-15% 〜 -7%',
+  '-7% 〜 -2%',
+  '-2% 〜 +2%（ほぼ同等）',
+  '+2% 〜 +7.5%',
+  '+7.5% 〜 +18%',
+  '+18%以上',
+] as const;
+
+/**
+ * Classify a YoY ratio value into one of the 7 fixed YOY_RATIO_BIN_EDGES bins
+ * (0-indexed). Same inclusive-lower/exclusive-upper convention as
+ * classifyRatioBin/classifyDemandRatioBin.
+ */
+export function classifyYoyRatioBin(r: number): number {
+  return classifyBin(r, YOY_RATIO_BIN_EDGES);
+}
+
+/** 指標ごとに異なる「算出不可」の理由（凡例・地図の破線輪郭に使う）。 */
+export const YOY_UNAVAILABLE_LABEL: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '算出不可（見込量2025が0）',
+  yoy_actual_change: '算出不可（2024年実績が0）',
+};
+
+/** テーブルセル用の短い「算出不可」表記（RATIO_UNAVAILABLE_CELL_LABELの年度間比較版）。 */
+export const YOY_UNAVAILABLE_CELL_LABEL: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '—（見込量2025が0）',
+  yoy_actual_change: '—（2024年実績が0）',
+};
+
+/** YoY比を「X.XX倍」で表示する。null（分母0で算出不可）は指標ごとの理由付きラベルにする。 */
+export function formatYoyRatio(r: number | null, metric: YoyMetricKind): string {
+  if (r === null) return YOY_UNAVAILABLE_CELL_LABEL[metric];
+  return `${r.toFixed(2)}倍`;
+}
+
+/** YoY比を符号付き変化率（例: "+3.0%"）で表示する。null（算出不可）はformatYoyRatioと同じラベル。 */
+export function formatYoyChangeRatio(r: number | null, metric: YoyMetricKind): string {
+  if (r === null) return YOY_UNAVAILABLE_CELL_LABEL[metric];
+  return formatChangeRatio(r);
+}
+
 // Continuous (actual / need) metric ramp — light to dark blue.
 export const SEQUENTIAL_RAMP_COLORS = [
   '#cde2fb',
@@ -153,6 +210,18 @@ export function formatRatio(r: number | null): string {
 
 export function formatPercent(r: number | null, digits: number = 1): string {
   if (r === null) return '未算出（原典 XXX）';
+  return `${(r * 100).toFixed(digits)}%`;
+}
+
+/**
+ * 病床機能報告の報告率（0〜1）を百分率表示にする。formatPercent とは別関数にして
+ * null分岐を持たせていない: formatPercent の null分岐（「未算出（原典 XXX）」）は
+ * 推計流出/流入患者割合のセンチネル'XXX'専用の文言で、report_rate_2024/2025
+ * （AreaYoyArea — 型は number で null を取らない）に流用すると、将来なんらかの
+ * 理由でnullが来たときに誤った理由（'XXX'）を表示してしまう（現行データはnull
+ * 0件で確認済みだが latent なリスクのため分離した）。
+ */
+export function formatReportRate(r: number, digits: number = 1): string {
   return `${(r * 100).toFixed(digits)}%`;
 }
 
@@ -275,6 +344,11 @@ export function demandCategoryOf(metric: DemandMetricKind): DemandCategoryKey {
   return DEMAND_METRIC_CATEGORY[metric];
 }
 
+/** True for the 2 YoY (R6→R7公表年度間比較) metric kinds. */
+export function isYoyMetric(metric: MetricKind): metric is YoyMetricKind {
+  return metric === 'yoy_plan_vs_actual' || metric === 'yoy_actual_change';
+}
+
 // ---- MapLibre helpers -----------------------------------------------------
 
 /**
@@ -338,5 +412,49 @@ export function readDemandRatio(
   year: number
 ): number | null {
   const v = props[demandRatioKey(category, year)];
+  return typeof v === 'number' ? v : null;
+}
+
+// ---- YoY (R6→R7 公表年度間比較, area_map.json) flat property keys ----------
+//
+// Mirrors web/scripts/lib/merge.mjs's yoyPlanRatioKey/yoyChangeRatioKey/
+// yoyPlanValueKey/yoyActual2024Key exactly (merge.test.ts checks all four
+// agree) so a key-naming change in one file can't silently drift from the
+// other (same trap as demandValueKey/demandRatioKey above — CLAUDE.md 罠10).
+
+/** Flat property key for 実績2025÷見込量2025, e.g. "y_pa_total". */
+export function yoyPlanRatioKey(fn: BedFunctionKey): string {
+  return `y_pa_${fn}`;
+}
+
+/** Flat property key for 実績2025÷実績2024, e.g. "y_yy_total". */
+export function yoyChangeRatioKey(fn: BedFunctionKey): string {
+  return `y_yy_${fn}`;
+}
+
+/** Flat property key for the raw 見込量2025(R6) value, e.g. "y_plan_total". */
+export function yoyPlanValueKey(fn: BedFunctionKey): string {
+  return `y_plan_${fn}`;
+}
+
+/** Flat property key for the raw 実績2024(R6) value, e.g. "y_a24_total". */
+export function yoyActual2024Key(fn: BedFunctionKey): string {
+  return `y_a24_${fn}`;
+}
+
+/** Read the YoY ratio for the given metric/function off a flat properties record. */
+export function readYoyRatio(
+  props: Record<string, unknown>,
+  metric: YoyMetricKind,
+  fn: BedFunctionKey
+): number | null {
+  const key = metric === 'yoy_plan_vs_actual' ? yoyPlanRatioKey(fn) : yoyChangeRatioKey(fn);
+  const v = props[key];
+  return typeof v === 'number' ? v : null;
+}
+
+/** Read a raw YoY value (見込量2025/実績2024) off a flat properties record by its already-built key. */
+export function readYoyValue(props: Record<string, unknown>, key: string): number | null {
+  const v = props[key];
   return typeof v === 'number' ? v : null;
 }

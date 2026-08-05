@@ -5,6 +5,9 @@ import type {
   AreaDemandData,
   AreaIndicator,
   AreaIndicatorsData,
+  AreaYoyArea,
+  AreaYoyData,
+  AreaYoyMetadata,
   BedFunctionKey,
   Facility,
   FacilityMetric,
@@ -139,6 +142,85 @@ function makeDemandData(areas: AreaDemandArea[]): AreaDemandData {
   };
 }
 
+function makeYoyArea(overrides: Partial<AreaYoyArea> = {}): AreaYoyArea {
+  return {
+    area_code: '0101',
+    area_name: '南渡島',
+    pref_code: '01',
+    pref_name: '北海道',
+    report_rate_2024: 0.95,
+    report_rate_2025: 1.0,
+    beds: {
+      total: { plan_2025: 5216, actual_2025: 4995, actual_2024: 5243 },
+      high_acute: { plan_2025: 0, actual_2025: 661, actual_2024: 0 },
+      acute: { plan_2025: 2322, actual_2025: 2471, actual_2024: 2363 },
+      recovery: { plan_2025: 778, actual_2025: 801, actual_2024: 785 },
+      chronic: { plan_2025: 1160, actual_2025: 1062, actual_2024: 1155 },
+    },
+    ...overrides,
+  };
+}
+
+const YOY_METADATA: AreaYoyMetadata = {
+  title: 'test-yoy',
+  source: [
+    {
+      published_fy: 'R7',
+      name: '②構想区域の病床数等（別添４）',
+      publisher: '厚生労働省',
+      url: 'https://example.test/001723349.xlsx',
+      page_url: 'https://example.test/yoy-page',
+      fiscal_year: '令和7年度（2025年度）',
+      source_file: 'R7/001723349.xlsx',
+      source_sha256: 'r7hash',
+      source_sheet: '構想区域別必要量との比較',
+      acquired_date: '2026-08-04',
+      license: 'テスト利用規約',
+      original_title: 'R7原題',
+      original_notes: [],
+    },
+    {
+      published_fy: 'R6',
+      name: '別添４③（構想区域の病床数等の状況）',
+      publisher: '厚生労働省',
+      url: 'https://example.test/001723128.zip',
+      source_note: '令和6年度版一括DL zip に同梱',
+      page_url: 'https://example.test/yoy-page',
+      fiscal_year: '令和6年度',
+      source_file: 'R6/別添４③（構想区域の病床数等の状況）.xlsx',
+      source_sha256: 'r6hash',
+      source_sheet: '構想区域別必要量との比較',
+      acquired_date: '2026-08-05',
+      license: 'テスト利用規約',
+      original_title: 'R6原題',
+      original_notes: [],
+    },
+  ],
+  processing: {
+    script: 'tools/build_web_yoy.py',
+    inputs: [],
+    steps: [],
+    caveat: '年度間比較の注記テキスト（見込量2025はR6公表時点の見込み）',
+  },
+  fields: {},
+  known_issues: [
+    {
+      id: 'area_yoy_2024_actual_from_r6',
+      summary: '2024年実績はR6公表分を採用した',
+      action: 'beds.*.actual_2024はpublished_fy==R6の値である',
+    },
+  ],
+};
+
+function makeYoyData(areas: AreaYoyArea[]): AreaYoyData {
+  return {
+    metadata: YOY_METADATA,
+    functions: ['total', 'high_acute', 'acute', 'recovery', 'chronic'],
+    function_labels: FULL_FUNCTION_LABELS,
+    areas,
+  };
+}
+
 const FACILITY_METRICS: FacilityMetric[] = [
   { key: 'beds_total', metric: '病床数', bed_function: '休棟中等含む計', label: '病床数（休棟中等含む計）' },
   { key: 'doctors_fulltime', metric: '医師数（常勤）', bed_function: '', label: '医師数（常勤）' },
@@ -231,8 +313,16 @@ describe('buildAreaTableCsv (bed metrics)', () => {
     });
     const indicators = makeIndicatorsData([areaA, areaB]);
     const demand = makeDemandData([makeDemandArea()]);
+    const yoy = makeYoyData([makeYoyArea()]);
 
-    const { filename, text } = buildAreaTableCsv({ indicators, demand, metric: 'ratio', bedFunction: 'high_acute', year: 2024 });
+    const { filename, text } = buildAreaTableCsv({
+      indicators,
+      demand,
+      yoy,
+      metric: 'ratio',
+      bedFunction: 'high_acute',
+      year: 2024,
+    });
 
     expect(filename).toBe('area_beds_ratio_high_acute_2025_R7.csv');
 
@@ -253,8 +343,16 @@ describe('buildAreaTableCsv (bed metrics)', () => {
   it('varies filename/condition text by metric (actual/need), and embeds the source SHA-256/page URL', () => {
     const indicators = makeIndicatorsData([makeIndicatorsArea()]);
     const demand = makeDemandData([makeDemandArea()]);
+    const yoy = makeYoyData([makeYoyArea()]);
 
-    const { filename, text } = buildAreaTableCsv({ indicators, demand, metric: 'actual', bedFunction: 'total', year: 2024 });
+    const { filename, text } = buildAreaTableCsv({
+      indicators,
+      demand,
+      yoy,
+      metric: 'actual',
+      bedFunction: 'total',
+      year: 2024,
+    });
 
     expect(filename).toBe('area_beds_actual_total_2025_R7.csv');
     expect(text).toContain('出力条件: 指標=実績病床数（2025年実績）, 病床機能=合計, 対象=全1構想区域');
@@ -268,10 +366,12 @@ describe('buildAreaTableCsv (demand metrics)', () => {
   it('produces one row per area for the selected category/year, rounding ratio_to_2024 to 4 decimals', () => {
     const indicators = makeIndicatorsData([makeIndicatorsArea()]);
     const demand = makeDemandData([makeDemandArea()]);
+    const yoy = makeYoyData([makeYoyArea()]);
 
     const { filename, text } = buildAreaTableCsv({
       indicators,
       demand,
+      yoy,
       metric: 'demand_home_care',
       bedFunction: 'total',
       year: 2040,
@@ -297,10 +397,12 @@ describe('buildAreaTableCsv (demand metrics)', () => {
   it('uses the outpatient category label/key and the requested year in the filename', () => {
     const indicators = makeIndicatorsData([makeIndicatorsArea()]);
     const demand = makeDemandData([makeDemandArea()]);
+    const yoy = makeYoyData([makeYoyArea()]);
 
     const { filename, text } = buildAreaTableCsv({
       indicators,
       demand,
+      yoy,
       metric: 'demand_outpatient',
       bedFunction: 'total',
       year: 2040,
@@ -312,12 +414,88 @@ describe('buildAreaTableCsv (demand metrics)', () => {
   });
 });
 
+describe('buildAreaTableCsv (yoy metrics)', () => {
+  it('produces one row per area for yoy_plan_vs_actual (実績2025/見込量2025), with a self-describing filename/header', () => {
+    const indicators = makeIndicatorsData([makeIndicatorsArea()]);
+    const demand = makeDemandData([makeDemandArea()]);
+    const areaA = makeYoyArea();
+    const areaB = makeYoyArea({
+      area_code: '0102',
+      area_name: '南檜山',
+      beds: { ...areaA.beds, high_acute: { plan_2025: 0, actual_2025: 0, actual_2024: 0 } },
+    });
+    const yoy = makeYoyData([areaA, areaB]);
+
+    const { filename, text } = buildAreaTableCsv({
+      indicators,
+      demand,
+      yoy,
+      metric: 'yoy_plan_vs_actual',
+      bedFunction: 'high_acute',
+      year: 2024,
+    });
+
+    expect(filename).toBe('area_yoy_yoy_plan_vs_actual_high_acute_R6_R7.csv');
+
+    const lines = text.split('\r\n');
+    const headerLine = lines.find((l) => l.startsWith('area_code,'))!;
+    expect(headerLine).toBe(
+      'area_code,area_name,pref_code,pref_name,bed_function,plan_2025_r6,actual_2025_r7,actual_2024_r6,report_rate_2024_r6,report_rate_2025_r7,ratio,note'
+    );
+
+    // published_fyという列自体を持たない（'R6+R7'という無い値を発明しない代わりに
+    // 列名(_r6/_r7)へ由来を持たせている。修正1a）。
+    // high_acute: plan_2025=0 -> ratio null (欠測=空欄) + note, actual_2025 unaffected.
+    const rowA = lines.find((l) => l.startsWith('0101,'))!;
+    expect(rowA).toBe('0101,南渡島,01,北海道,高度急性期,0,661,0,0.95,1,,見込量2025が0のため比は算出不可');
+
+    const rowB = lines.find((l) => l.startsWith('0102,'))!;
+    expect(rowB).toBe('0102,南檜山,01,北海道,高度急性期,0,0,0,0.95,1,,見込量2025が0のため比は算出不可');
+  });
+
+  it('produces yoy_actual_change (実績2025/実績2024) rows, and embeds both R7/R6 source blocks + the 2024実績 known issue', () => {
+    const indicators = makeIndicatorsData([makeIndicatorsArea()]);
+    const demand = makeDemandData([makeDemandArea()]);
+    const yoy = makeYoyData([makeYoyArea()]);
+
+    const { filename, text } = buildAreaTableCsv({
+      indicators,
+      demand,
+      yoy,
+      metric: 'yoy_actual_change',
+      bedFunction: 'total',
+      year: 2024,
+    });
+
+    expect(filename).toBe('area_yoy_yoy_actual_change_total_R6_R7.csv');
+
+    const row = text.split('\r\n').find((l) => l.startsWith('0101,'))!;
+    // 4995 / 5243 = 0.95269... -> rounds to 0.9527 (小数第4位)
+    expect(row).toBe('0101,南渡島,01,北海道,合計,5216,4995,5243,0.95,1,0.9527,');
+
+    expect(text).toContain(
+      '出力条件: 指標=実績の1年変化（2024→2025）（2025年実績（R7公表）/2024年実績（R6公表））, 病床機能=合計, 対象=全1構想区域'
+    );
+    expect(text).toContain('原典ファイル: R7/001723349.xlsx（SHA-256: r7hash）');
+    expect(text).toContain(
+      'R6公表分の原典ファイル: R6/別添４③（構想区域の病床数等の状況）.xlsx（SHA-256: r6hash） / 取得日: 2026-08-05'
+    );
+    expect(text).toContain('注記: 年度間比較の注記テキスト（見込量2025はR6公表時点の見込み）');
+    expect(text).toContain('注記（2024年実績の採用について）: 2024年実績はR6公表分を採用した／beds.*.actual_2024はpublished_fy==R6の値である');
+  });
+});
+
 // ---- buildAreaDetailCsv -----------------------------------------------------
 
 describe('buildAreaDetailCsv', () => {
   const baseArgs = {
     indicatorsMetadata: INDICATORS_METADATA,
     demandMetadata: DEMAND_METADATA,
+    yoyMetadata: YOY_METADATA,
+    // 年度間比較を明示的にテストしないケースでは yoyArea: null にしておき、
+    // dataset=yoy の行・注記が一切出ないこと（demandArea:nullの扱いと同じ)を
+    // 既存のアサーションが検証し続けられるようにする。
+    yoyArea: null as AreaYoyArea | null,
     functionLabels: FULL_FUNCTION_LABELS,
     demandCategoryLabels: { home_care: '在宅（訪問診療）', outpatient: '外来' },
     baselineYear: 2024,
@@ -400,6 +578,9 @@ describe('buildAreaDetailCsv', () => {
     expect(text).not.toContain('人口（医療需要推計の基準人口）');
     expect(text).not.toContain('人口（2040年推計）');
     expect(text).not.toContain('注記（医療需要推計）');
+    // yoyArea is also null in baseArgs -> dataset=yoy rows/note must be absent too.
+    expect(text).not.toContain(',yoy,');
+    expect(text).not.toContain('注記（年度間比較）');
     // basic/beds rows are still present
     expect(text).toContain('人口（2020年国勢調査）');
     expect(text).toContain('高度急性期,実績');
@@ -454,6 +635,74 @@ describe('buildAreaDetailCsv', () => {
     const lines = text.split('\r\n');
     expect(lines).toContain(
       'R7,0101,南渡島,01,北海道,beds,慢性期,比（実績/必要数）,2025,,,必要数が0のため比は算出不可'
+    );
+  });
+
+  // ---- dataset=yoy (年度間比較 R6→R7, M7) ----------------------------------
+
+  it('emits dataset=yoy rows with per-row published_fy (R6 for plan_2025/actual_2024/report_rate_2024, R7 for actual_2025/report_rate_2025, blank for derived ratios — not a made-up "R6+R7")', () => {
+    const area = makeIndicatorsArea();
+    const yoyArea = makeYoyArea();
+
+    const { text } = buildAreaDetailCsv({
+      ...baseArgs,
+      area,
+      demandArea: null,
+      yoyArea,
+      functions: ['total', 'high_acute'],
+      demandCategories: [],
+      demandYears: [],
+      demandYearLabels: {},
+    });
+
+    const lines = text.split('\r\n');
+
+    // 報告率（区域単位、機能に依存しない）
+    expect(lines).toContain('R6,0101,南渡島,01,北海道,yoy,病床機能報告の報告率,報告率2024（R6公表）,2024,0.95,割合,');
+    expect(lines).toContain('R7,0101,南渡島,01,北海道,yoy,病床機能報告の報告率,報告率2025（R7公表）,2025,1,割合,');
+
+    // 機能別の生値（合計）
+    expect(lines).toContain('R6,0101,南渡島,01,北海道,yoy,合計,見込量2025（R6公表）,2025,5216,床,');
+    expect(lines).toContain('R7,0101,南渡島,01,北海道,yoy,合計,実績2025（R7公表）,2025,4995,床,');
+    expect(lines).toContain('R6,0101,南渡島,01,北海道,yoy,合計,実績2024（R6公表）,2024,5243,床,');
+
+    // 派生値（比・変化率）はpublished_fyを空欄にする（単一の公表回に帰属しない。
+    // 'R6+R7'という無い値は発明しない）。理由はnote列に書く。丸めは5464.615と
+    // 同じ小数第4位: 4995/5216 = 0.95765... -> 0.9576、4995/5243 = 0.95269... -> 0.9527
+    expect(lines).toContain(
+      ',0101,南渡島,01,北海道,yoy,合計,比（実績2025/見込量2025）,,0.9576,,実績2025(R7公表)÷見込量2025(R6公表)のため単一の公表年度に帰属しない'
+    );
+    expect(lines).toContain(
+      ',0101,南渡島,01,北海道,yoy,合計,変化率（実績2025/実績2024）,,0.9527,,実績2025(R7公表)÷実績2024(R6公表)のため単一の公表年度に帰属しない'
+    );
+
+    expect(text).toContain('注記（年度間比較）: 年度間比較の注記テキスト（見込量2025はR6公表時点の見込み）');
+    expect(text).toContain(
+      '注記（2024年実績の採用について）: 2024年実績はR6公表分を採用した／beds.*.actual_2024はpublished_fy==R6の値である'
+    );
+  });
+
+  it('marks the yoy ratios unavailable (blank + note) when their denominator is 0 (高度急性期のように見込量/実績2024が0の区域がある)', () => {
+    const area = makeIndicatorsArea();
+    const yoyArea = makeYoyArea();
+
+    const { text } = buildAreaDetailCsv({
+      ...baseArgs,
+      area,
+      demandArea: null,
+      yoyArea,
+      functions: ['high_acute'],
+      demandCategories: [],
+      demandYears: [],
+      demandYearLabels: {},
+    });
+
+    const lines = text.split('\r\n');
+    expect(lines).toContain(
+      ',0101,南渡島,01,北海道,yoy,高度急性期,比（実績2025/見込量2025）,,,,実績2025(R7公表)÷見込量2025(R6公表)のため単一の公表年度に帰属しない／見込量2025が0のため比は算出不可'
+    );
+    expect(lines).toContain(
+      ',0101,南渡島,01,北海道,yoy,高度急性期,変化率（実績2025/実績2024）,,,,実績2025(R7公表)÷実績2024(R6公表)のため単一の公表年度に帰属しない／実績2024が0のため比は算出不可'
     );
   });
 });

@@ -3,9 +3,12 @@ import {
   RATIO_BIN_COLORS,
   RATIO_BIN_LABELS,
   RATIO_UNAVAILABLE_LABEL,
+  YOY_RATIO_BIN_LABELS,
+  YOY_UNAVAILABLE_LABEL,
   computeSequentialClasses,
   formatInteger,
   isDemandMetric,
+  isYoyMetric,
 } from '../lib/metrics';
 import type { MetricKind } from '../types';
 
@@ -26,6 +29,8 @@ const METRIC_TITLES: Record<MetricKind, string> = {
   need: '2025年必要数',
   demand_home_care: '在宅（訪問診療）需要の2024年度比',
   demand_outpatient: '外来需要の2024年度比',
+  yoy_plan_vs_actual: '見込量比（実績2025・R7 ÷ 見込量2025・R6）',
+  yoy_actual_change: '実績の1年変化（実績2025・R7 ÷ 実績2024・R6）',
 };
 
 export default function Legend({ metric, functionLabel, quantileEdges, demandYearLabel, showFacilityNote }: LegendProps) {
@@ -33,7 +38,8 @@ export default function Legend({ metric, functionLabel, quantileEdges, demandYea
   // 病床数は339区域中69区域が0床)。地図の塗り分けと凡例の区分を必ず一致させる
   // ため、両方とも同じ computeSequentialClasses() から重複を除いた境界と、
   // それに合わせて間引いた色を取得する。実数指標(actual/need)のときのみ使う。
-  const sequential = metric === 'ratio' || isDemandMetric(metric) ? null : computeSequentialClasses(quantileEdges);
+  const sequential =
+    metric === 'ratio' || isDemandMetric(metric) || isYoyMetric(metric) ? null : computeSequentialClasses(quantileEdges);
 
   const title = isDemandMetric(metric)
     ? `${METRIC_TITLES[metric]}（${demandYearLabel}）`
@@ -72,6 +78,26 @@ export default function Legend({ metric, functionLabel, quantileEdges, demandYea
             年度スライダーを動かしても色の意味は変わらない。2024年度（基準年）を選択すると、定義上
             すべての区域が中立色（-5%〜+5%）になる。値は「レセプト件数/月」であり、患者数・人数
             そのものではない。2030年度以降はいずれも現状投影値。
+          </p>
+        </>
+      ) : isYoyMetric(metric) ? (
+        <>
+          {RATIO_BIN_COLORS.map((color, i) => (
+            <div className="legend-row" key={color}>
+              <span className="legend-swatch" style={{ background: color }} />
+              <span>{YOY_RATIO_BIN_LABELS[i]}</span>
+            </div>
+          ))}
+          <div className="legend-row">
+            <span className="legend-swatch legend-swatch-unavailable" />
+            <span>{YOY_UNAVAILABLE_LABEL[metric]}</span>
+          </div>
+          <p className="legend-note">
+            区分は病床機能によらず同じ意味を保つよう、1.0倍（変化なし）を中心に固定した境界（対辺が
+            互いに逆数）を使用。
+            {metric === 'yoy_plan_vs_actual'
+              ? '見込量2025はR6公表時点の見込みで、実績2025（R7公表分）とは公表回が異なる。'
+              : '実績2024はR6公表分、実績2025はR7公表分（いずれも構想区域別の病床機能報告）。区域別の2024年実績は本来R7公表分では使えない（既知欠陥）ため、この比較にはR6公表分を用いている。'}
           </p>
         </>
       ) : (

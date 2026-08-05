@@ -7,7 +7,7 @@
 // ここで新しい計算規則は作らない。派生値（比・変化率）だけ小数第4位で丸める
 // （原典由来の値＝病床数・レセプト件数/月・人口・面積は丸めずそのまま出す）。
 
-import { computeRatio, demandCategoryOf, isDemandMetric } from './metrics';
+import { computeRatio, demandCategoryOf, isDemandMetric, isYoyMetric } from './metrics';
 import { toCsvText } from './csv';
 import type { CsvValue } from './csv';
 import type {
@@ -17,6 +17,9 @@ import type {
   AreaIndicator,
   AreaIndicatorsData,
   AreaIndicatorsMetadata,
+  AreaYoyArea,
+  AreaYoyData,
+  AreaYoyMetadata,
   BedFunctionKey,
   BedMetricKind,
   DemandCategoryKey,
@@ -26,6 +29,7 @@ import type {
   FacilitySummaryMetadata,
   FacilityValueStatus,
   MetricKind,
+  YoyMetricKind,
 } from '../types';
 
 /** buildXxxCsv系が返す、ダウンロード対象そのもの（ファイル名 + 本文）。 */
@@ -93,9 +97,40 @@ function buildPreamble(opts: PreambleOptions): string[] {
   return lines;
 }
 
+/**
+ * 区域識別列（全CSV共通の先頭5列: published_fy, area_code, area_name, pref_code, pref_name）を
+ * 任意のpublished_fy値で組み立てる。基礎情報・病床・医療需要推計の各データセットはすべて
+ * R7単独公表分なので下のareaIdColumns()（固定でPUBLISHED_FY）を使うが、年度間比較
+ * （dataset=yoy、buildAreaDetailCsv）は行ごとにR6/R7が混在するため、行ごとに正しい
+ * published_fyを渡す必要がある。fyには空文字も渡せる（R6/R7両方の値から算出した
+ * 派生の比の行のように、単一の公表回に帰属しない場合。'R6+R7'のような無い値は
+ * 発明しない — CLAUDE.md 罠20）。
+ */
+function areaIdColumnsWithFy(
+  area: { area_code: string; area_name: string; pref_code: string; pref_name: string },
+  fy: string
+): CsvValue[] {
+  return [fy, area.area_code, area.area_name, area.pref_code, area.pref_name];
+}
+
 /** 区域識別列（全CSV共通の先頭5列: published_fy, area_code, area_name, pref_code, pref_name）。 */
 function areaIdColumns(area: { area_code: string; area_name: string; pref_code: string; pref_name: string }): CsvValue[] {
-  return [PUBLISHED_FY, area.area_code, area.area_name, area.pref_code, area.pref_name];
+  return areaIdColumnsWithFy(area, PUBLISHED_FY);
+}
+
+/**
+ * 区域識別列（published_fyを含まない4列: area_code, area_name, pref_code, pref_name）。
+ * buildYoyAreaTableCsv専用: この横持ちCSVは値そのものが列ごとにR6/R7混在
+ * （plan_2025_r6/actual_2025_r7/…）で単一のpublished_fy列に収まらないため、
+ * 列名の接尾辞（_r6/_r7）で由来を示し、published_fy列自体を持たない（修正1a）。
+ */
+function areaIdColumnsNoFy(area: {
+  area_code: string;
+  area_name: string;
+  pref_code: string;
+  pref_name: string;
+}): CsvValue[] {
+  return [area.area_code, area.area_name, area.pref_code, area.pref_name];
 }
 
 // ---- 2-1. buildAreaTableCsv: 全339区域 × 現在の指標（地図に出ている内容） --
@@ -118,9 +153,38 @@ const DEMAND_METRIC_LABELS: Record<DemandMetricKind, string> = {
   demand_outpatient: '外来',
 };
 
+const YOY_METRIC_LABELS: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '見込量比（2025年）',
+  yoy_actual_change: '実績の1年変化（2024→2025）',
+};
+
+// 出力条件文字列の指標説明（例:「2025年実績（R7公表）/2025年見込量（R6公表）」）。
+const YOY_METRIC_DESCRIPTIONS: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '2025年実績（R7公表）/2025年見込量（R6公表）',
+  yoy_actual_change: '2025年実績（R7公表）/2024年実績（R6公表）',
+};
+
+const YOY_RATIO_UNAVAILABLE_NOTE: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '見込量2025が0のため比は算出不可',
+  yoy_actual_change: '実績2024が0のため比は算出不可',
+};
+
+/**
+ * buildAreaDetailCsv の dataset=yoy 派生比行（比・変化率）で published_fy を
+ * 空欄にする理由をnote列に書くための文言。この2行はR6公表分（見込量2025/実績2024）
+ * とR7公表分（実績2025）の両方から算出した値で、単一の公表回に帰属しないため
+ * published_fyを空欄にしている（'R6+R7'のような無い値は発明しない。CLAUDE.md
+ * 罠20「公表物が言っていない年を出力に足さない」と同じ規律）。
+ */
+const YOY_RATIO_FY_NOTE: Record<YoyMetricKind, string> = {
+  yoy_plan_vs_actual: '実績2025(R7公表)÷見込量2025(R6公表)のため単一の公表年度に帰属しない',
+  yoy_actual_change: '実績2025(R7公表)÷実績2024(R6公表)のため単一の公表年度に帰属しない',
+};
+
 export interface BuildAreaTableCsvArgs {
   indicators: AreaIndicatorsData;
   demand: AreaDemandData;
+  yoy: AreaYoyData;
   metric: MetricKind;
   bedFunction: BedFunctionKey;
   year: number;
@@ -130,11 +194,15 @@ export interface BuildAreaTableCsvArgs {
  * 全339区域 × 現在選択中の指標（地図に出ている内容）を1CSVにする。
  * 病床指標（ratio/actual/need）のときは選択中の病床機能1つについて339行、
  * 需要指標（demand_home_care/demand_outpatient）のときは選択中の区分1つ・
- * 年度1つについて339行を出す（isDemandMetricで分岐）。
+ * 年度1つについて339行、年度間比較指標（yoy_plan_vs_actual/yoy_actual_change）
+ * のときは選択中の病床機能1つについて339行を出す（isDemandMetric/isYoyMetricで分岐）。
  */
 export function buildAreaTableCsv(args: BuildAreaTableCsvArgs): DownloadCsv {
-  const { indicators, demand, metric, bedFunction, year } = args;
+  const { indicators, demand, yoy, metric, bedFunction, year } = args;
 
+  if (isYoyMetric(metric)) {
+    return buildYoyAreaTableCsv(yoy, metric, bedFunction);
+  }
   if (isDemandMetric(metric)) {
     return buildDemandAreaTableCsv(demand, metric, year);
   }
@@ -220,6 +288,75 @@ function buildDemandAreaTableCsv(demand: AreaDemandData, metric: DemandMetricKin
   };
 }
 
+/** metadata.source（R7/R6の2要素配列）から指定published_fyの出典ブロックを取り出す。 */
+function findYoySource(yoyMetadata: AreaYoyMetadata, publishedFy: 'R7' | 'R6') {
+  return yoyMetadata.source.find((s) => s.published_fy === publishedFy);
+}
+
+/** area_yoy_R6_R7.json の known_issues から「2024年実績はR6公表分を採用した」の1件を取り出す。 */
+function findYoyActualFromR6Issue(yoyMetadata: AreaYoyMetadata) {
+  return yoyMetadata.known_issues.find((issue) => issue.id === 'area_yoy_2024_actual_from_r6') ?? null;
+}
+
+// published_fyは持たない（値は1つの公表回に帰属しない: plan_2025はR6、actual_2025
+// はR7、actual_2024/report_rate_2024はR6、report_rate_2025はR7、ratioはR6/R7両方から
+// 算出。'R6+R7'のような発明した値でpublished_fy列を埋めない代わりに、列名自体に
+// 由来を持たせる。data/processed/area_yoy_diff.csv が既に採っている
+// plan_2025_r6/actual_2025_r7/actual_2024_r6 の命名に、report_rate_2024_r6/
+// report_rate_2025_r7を揃えて追加した形）。
+function buildYoyAreaTableCsv(yoy: AreaYoyData, metric: YoyMetricKind, bedFunction: BedFunctionKey): DownloadCsv {
+  const bedFunctionLabel = yoy.function_labels[bedFunction];
+  const header = [
+    'area_code',
+    'area_name',
+    'pref_code',
+    'pref_name',
+    'bed_function',
+    'plan_2025_r6',
+    'actual_2025_r7',
+    'actual_2024_r6',
+    'report_rate_2024_r6',
+    'report_rate_2025_r7',
+    'ratio',
+    'note',
+  ];
+  const rows: CsvValue[][] = yoy.areas.map((area) => {
+    const beds = area.beds[bedFunction];
+    const denominator = metric === 'yoy_plan_vs_actual' ? beds.plan_2025 : beds.actual_2024;
+    const ratio = computeRatio(beds.actual_2025, denominator);
+    return [
+      ...areaIdColumnsNoFy(area),
+      bedFunctionLabel,
+      beds.plan_2025,
+      beds.actual_2025,
+      beds.actual_2024,
+      area.report_rate_2024,
+      area.report_rate_2025,
+      ratio === null ? null : round4(ratio),
+      ratio === null ? YOY_RATIO_UNAVAILABLE_NOTE[metric] : '',
+    ];
+  });
+
+  const condition = `指標=${YOY_METRIC_LABELS[metric]}（${YOY_METRIC_DESCRIPTIONS[metric]}）, 病床機能=${bedFunctionLabel}, 対象=全${yoy.areas.length}構想区域`;
+  const r6Source = findYoySource(yoy.metadata, 'R6');
+  const extraSourceLine = r6Source
+    ? `R6公表分の原典ファイル: ${r6Source.source_file}（SHA-256: ${r6Source.source_sha256}） / 取得日: ${r6Source.acquired_date}`
+    : undefined;
+  const yoyIssue = findYoyActualFromR6Issue(yoy.metadata);
+  const preamble = buildPreamble({
+    source: findYoySource(yoy.metadata, 'R7') ?? yoy.metadata.source[0],
+    condition,
+    caveat: yoy.metadata.processing.caveat,
+    extraSourceLine,
+    extraCaveatLines: yoyIssue ? [`注記（2024年実績の採用について）: ${yoyIssue.summary}／${yoyIssue.action}`] : [],
+  });
+
+  return {
+    filename: `area_yoy_${metric}_${bedFunction}_R6_R7.csv`,
+    text: toCsvText(header, rows, { preamble }),
+  };
+}
+
 // ---- 2-2. buildAreaDetailCsv: 選択区域1つの指標（long形式） ----------------
 
 const AREA_DETAIL_HEADER = [
@@ -253,8 +390,12 @@ function flowRateNote(sourceValue: string | undefined): string {
 export interface BuildAreaDetailCsvArgs {
   area: AreaIndicator;
   demandArea: AreaDemandArea | null;
+  /** area_yoy.json から引いた当該区域の年度間比較データ。339区域全件に存在するはずだが
+   * （sync-data.mjsが突合検証済み）、型上は見つからない場合に備える。 */
+  yoyArea: AreaYoyArea | null;
   indicatorsMetadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
+  yoyMetadata: AreaYoyMetadata;
   functions: BedFunctionKey[];
   functionLabels: Record<BedFunctionKey, string>;
   demandCategories: DemandCategoryKey[];
@@ -265,17 +406,20 @@ export interface BuildAreaDetailCsvArgs {
 }
 
 /**
- * 選択区域1つの指標をlong形式（1行=1事実）で出す。dataset=basic/beds/demandの
- * 3種の行を持つ。demandArea が null のときは、dataset=demand の行に加えて
+ * 選択区域1つの指標をlong形式（1行=1事実）で出す。dataset=basic/beds/demand/yoyの
+ * 4種の行を持つ。demandArea が null のときは、dataset=demand の行に加えて
  * dataset=basic のうち需要推計由来の2行（基準人口・2040年人口。いずれも
  * AreaDemandArea.population_* から取る値でAreaIndicatorには無い）も出さない。
+ * yoyArea が null のときは dataset=yoy の行を出さない。
  */
 export function buildAreaDetailCsv(args: BuildAreaDetailCsvArgs): DownloadCsv {
   const {
     area,
     demandArea,
+    yoyArea,
     indicatorsMetadata,
     demandMetadata,
+    yoyMetadata,
     functions,
     functionLabels,
     demandCategories,
@@ -366,15 +510,93 @@ export function buildAreaDetailCsv(args: BuildAreaDetailCsvArgs): DownloadCsv {
     }
   }
 
+  // dataset=yoy（年度間比較 R6→R7）。行ごとにpublished_fyが変わる
+  // （見込量2025・実績2024・報告率2024はR6公表、実績2025・報告率2025はR7公表）ので、
+  // idColsではなくareaIdColumnsWithFy(area, <その行のfy>)を都度使う。比・変化率の
+  // 2行はR6/R7両方から算出した値で単一の公表回に帰属しないため、'R6+R7'のような
+  // 無い値を発明する代わりにpublished_fyを空欄にし、理由をnote列(YOY_RATIO_FY_NOTE)
+  // に書く（修正1b）。
+  if (yoyArea !== null) {
+    const yoyReportRateLabel = '病床機能報告の報告率';
+    rows.push([
+      ...areaIdColumnsWithFy(area, 'R6'),
+      'yoy',
+      yoyReportRateLabel,
+      '報告率2024（R6公表）',
+      2024,
+      yoyArea.report_rate_2024,
+      '割合',
+      '',
+    ]);
+    rows.push([
+      ...areaIdColumnsWithFy(area, 'R7'),
+      'yoy',
+      yoyReportRateLabel,
+      '報告率2025（R7公表）',
+      2025,
+      yoyArea.report_rate_2025,
+      '割合',
+      '',
+    ]);
+
+    for (const fn of functions) {
+      const label = functionLabels[fn];
+      const beds = yoyArea.beds[fn];
+      rows.push([...areaIdColumnsWithFy(area, 'R6'), 'yoy', label, '見込量2025（R6公表）', 2025, beds.plan_2025, '床', '']);
+      rows.push([...areaIdColumnsWithFy(area, 'R7'), 'yoy', label, '実績2025（R7公表）', 2025, beds.actual_2025, '床', '']);
+      rows.push([...areaIdColumnsWithFy(area, 'R6'), 'yoy', label, '実績2024（R6公表）', 2024, beds.actual_2024, '床', '']);
+
+      const planRatio = computeRatio(beds.actual_2025, beds.plan_2025);
+      rows.push([
+        ...areaIdColumnsWithFy(area, ''),
+        'yoy',
+        label,
+        '比（実績2025/見込量2025）',
+        null,
+        planRatio === null ? null : round4(planRatio),
+        '',
+        planRatio === null
+          ? `${YOY_RATIO_FY_NOTE.yoy_plan_vs_actual}／${YOY_RATIO_UNAVAILABLE_NOTE.yoy_plan_vs_actual}`
+          : YOY_RATIO_FY_NOTE.yoy_plan_vs_actual,
+      ]);
+
+      const changeRatio = computeRatio(beds.actual_2025, beds.actual_2024);
+      rows.push([
+        ...areaIdColumnsWithFy(area, ''),
+        'yoy',
+        label,
+        '変化率（実績2025/実績2024）',
+        null,
+        changeRatio === null ? null : round4(changeRatio),
+        '',
+        changeRatio === null
+          ? `${YOY_RATIO_FY_NOTE.yoy_actual_change}／${YOY_RATIO_UNAVAILABLE_NOTE.yoy_actual_change}`
+          : YOY_RATIO_FY_NOTE.yoy_actual_change,
+      ]);
+    }
+  }
+
   const condition = `対象=構想区域 ${area.area_code} ${area.area_name}（${area.pref_name}）`;
   // 需要側のcaveatはdemand_forecast/demand_populationの2キーだが、追加行は
   // ブリーフの指示どおり「1本」にするため、両方をこの1行にまとめて入れる
   // （このCSVはレセプト値・基準/2040年人口の両方を含むため、片方だけでは
-  // 不十分と判断した）。
-  const extraCaveatLines =
-    demandArea !== null
+  // 不十分と判断した）。年度間比較(yoy)も同様に、caveatと「2024年実績はR6公表分を
+  // 採用した」known_issueをそれぞれ1行にまとめて入れる（ハードコードせず
+  // area_yoy_R6_R7.jsonから取る。CLAUDE.md「原典側の欠陥の記録先」参照）。
+  const extraCaveatLines = [
+    ...(demandArea !== null
       ? [`注記（医療需要推計）: ${demandMetadata.processing.caveat.demand_forecast} ${demandMetadata.processing.caveat.demand_population}`]
-      : [];
+      : []),
+    ...(yoyArea !== null
+      ? [
+          `注記（年度間比較）: ${yoyMetadata.processing.caveat}`,
+          ...(() => {
+            const yoyIssue = findYoyActualFromR6Issue(yoyMetadata);
+            return yoyIssue ? [`注記（2024年実績の採用について）: ${yoyIssue.summary}／${yoyIssue.action}`] : [];
+          })(),
+        ]
+      : []),
+  ];
   const preamble = buildPreamble({
     source: indicatorsMetadata.source,
     condition,

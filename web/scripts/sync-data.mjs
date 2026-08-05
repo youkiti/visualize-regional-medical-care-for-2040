@@ -1,14 +1,16 @@
 // Reads data/processed/area_indicators_R7.json,
 // data/processed/area_demand_R7.json,
 // data/processed/area_boundaries_R7.geojson,
-// data/processed/area_facilities_R7.json (the single source of truth,
-// owned by the Python pipeline — see CLAUDE.md) and the 13 tidy CSVs +
+// data/processed/area_facilities_R7.json,
+// data/processed/area_yoy_R6_R7.json (the single source of truth,
+// owned by the Python pipeline — see CLAUDE.md) and the 14 tidy CSVs +
 // .meta.json files under data/processed/, and writes the generated
 // artifacts the frontend bundles/fetches:
 //
 //   web/src/generated/area_indicators.json    — verbatim copy
 //   web/src/generated/area_demand.json        — verbatim copy
-//   web/src/generated/area_map.json           — boundaries + flat indicator/demand props
+//   web/src/generated/area_yoy.json           — verbatim copy (R6→R7公表年度間比較)
+//   web/src/generated/area_map.json           — boundaries + flat indicator/demand/yoy props
 //   web/src/generated/area_index.json         — lightweight per-area bbox/boundary_source
 //                                                lookup, used by App to resolve area
 //                                                selection independent of the map's
@@ -20,7 +22,7 @@
 //                                                area is selected (not bundled — see the
 //                                                design note above the facility-shard
 //                                                section below)
-//   web/public/downloads/<bundle>.zip         — the 13 processed CSVs (+ their
+//   web/public/downloads/<bundle>.zip         — the 14 processed CSVs (+ their
 //                                                .meta.json + README.md + MANIFEST.tsv)
 //                                                packed as one bulk-download archive
 //   web/public/downloads/area_boundaries_R7.geojson — verbatim copy, for standalone
@@ -38,7 +40,17 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 
-import { buildAreaMap, buildAreaIndex, demandValueKey, demandRatioKey, BED_FUNCTIONS } from './lib/merge.mjs';
+import {
+  buildAreaMap,
+  buildAreaIndex,
+  demandValueKey,
+  demandRatioKey,
+  yoyPlanRatioKey,
+  yoyChangeRatioKey,
+  yoyPlanValueKey,
+  yoyActual2024Key,
+  BED_FUNCTIONS,
+} from './lib/merge.mjs';
 import { buildAreaShard, buildFacilitySummary, shardFileName } from './lib/facilities.mjs';
 import { createZip, readZip } from './lib/zip.mjs';
 import { BUNDLE_ROOT, BUNDLE_FILE_NAME, BUNDLE_CSV_FILES, buildManifestTsv, buildBundleReadme } from './lib/bundle.mjs';
@@ -52,6 +64,7 @@ const indicatorsPath = path.join(repoRoot, 'data', 'processed', 'area_indicators
 const demandPath = path.join(repoRoot, 'data', 'processed', 'area_demand_R7.json');
 const boundariesPath = path.join(repoRoot, 'data', 'processed', 'area_boundaries_R7.geojson');
 const facilitiesPath = path.join(repoRoot, 'data', 'processed', 'area_facilities_R7.json');
+const yoyPath = path.join(repoRoot, 'data', 'processed', 'area_yoy_R6_R7.json');
 const processedDir = path.join(repoRoot, 'data', 'processed');
 const generatedDir = path.join(webDir, 'src', 'generated');
 const facilitiesOutDir = path.join(webDir, 'public', 'facilities');
@@ -63,6 +76,7 @@ const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for
 const EXPECTED_FEATURE_COUNT = 339;
 const EXPECTED_FACILITY_TOTAL = 11760;
 const EXPECTED_GEOCODED_TOTAL = 10244;
+const EXPECTED_YOY_FUNCTIONS = ['total', 'high_acute', 'acute', 'recovery', 'chronic'];
 
 function fail(message) {
   console.error(`[sync-data] ERROR: ${message}`);
@@ -126,6 +140,7 @@ function main() {
   const demand = readJson(demandPath, 'area_demand_R7.json');
   const boundaries = readJson(boundariesPath, 'area_boundaries_R7.geojson');
   const facilitiesData = readJson(facilitiesPath, 'area_facilities_R7.json');
+  const yoy = readJson(yoyPath, 'area_yoy_R6_R7.json');
 
   const features = boundaries.data.features;
   if (!Array.isArray(features) || features.length !== EXPECTED_FEATURE_COUNT) {
@@ -216,6 +231,69 @@ function main() {
       }
     }
   }
+
+  // --- area_yoy_R6_R7.json validation -----------------------------------
+  const yoyAreas = yoy.data.areas;
+  if (!Array.isArray(yoyAreas) || yoyAreas.length !== EXPECTED_FEATURE_COUNT) {
+    fail(
+      `area_yoy_R6_R7.json: "areas" must have exactly ${EXPECTED_FEATURE_COUNT} entries, got ${
+        Array.isArray(yoyAreas) ? yoyAreas.length : typeof yoyAreas
+      }`
+    );
+  }
+
+  const yoyCodeSet = new Set(yoyAreas.map((a) => a.area_code));
+  if (yoyCodeSet.size !== yoyAreas.length) {
+    fail('duplicate area_code found among area_yoy_R6_R7.json areas');
+  }
+
+  const yoyMissingVsBoundaries = [...boundaryCodeSet].filter((c) => !yoyCodeSet.has(c));
+  const boundariesMissingVsYoy = [...yoyCodeSet].filter((c) => !boundaryCodeSet.has(c));
+  if (yoyMissingVsBoundaries.length > 0 || boundariesMissingVsYoy.length > 0) {
+    fail(
+      'area_yoy_R6_R7.json area_code set differs from boundaries. ' +
+        `missing_in_yoy=${JSON.stringify(yoyMissingVsBoundaries)} ` +
+        `missing_in_boundaries=${JSON.stringify(boundariesMissingVsYoy)}`
+    );
+  }
+
+  const yoyFunctions = yoy.data.functions;
+  if (JSON.stringify(yoyFunctions) !== JSON.stringify(EXPECTED_YOY_FUNCTIONS)) {
+    fail(
+      `area_yoy_R6_R7.json: "functions" must equal ${JSON.stringify(EXPECTED_YOY_FUNCTIONS)}, ` +
+        `got ${JSON.stringify(yoyFunctions)}`
+    );
+  }
+
+  // MapView's YoY tooltip divides a numerator read from area_indicators_R7.json
+  // (a_<fn>, via readYoyValue(props, `a_${fn}`)) by a denominator read from
+  // area_yoy_R6_R7.json (y_plan_<fn>/y_a24_<fn>), while the ratio itself
+  // (y_pa_/y_yy_) is computed entirely inside area_yoy_R6_R7.json — see
+  // web/src/components/MapView.tsx formatHoverTooltip. If the two datasets'
+  // actual_2025 values ever diverged for some area/function, the tooltip's
+  // displayed "numerator ÷ denominator" would silently disagree with the
+  // displayed ratio. Verify all 339 areas x 5 functions agree now (all match
+  // as of M7) so a future divergence fails the build instead of shipping a
+  // mismatched tooltip.
+  const indicatorAreaByCode = new Map(areas.map((a) => [a.area_code, a]));
+  for (const yoyArea of yoyAreas) {
+    const indicatorArea = indicatorAreaByCode.get(yoyArea.area_code);
+    if (!indicatorArea) {
+      fail(`area_yoy_R6_R7.json: area ${yoyArea.area_code} not found in area_indicators_R7.json`);
+      continue;
+    }
+    for (const fn of yoyFunctions) {
+      const yoyActual2025 = yoyArea.beds[fn].actual_2025;
+      const indicatorActual2025 = indicatorArea.beds[fn].actual_2025;
+      if (yoyActual2025 !== indicatorActual2025) {
+        fail(
+          `actual_2025 mismatch for area ${yoyArea.area_code} function ${fn}: ` +
+            `area_indicators_R7.json=${indicatorActual2025} area_yoy_R6_R7.json=${yoyActual2025}`
+        );
+      }
+    }
+  }
+  // --- end area_yoy_R6_R7.json validation --------------------------------
 
   // --- area_facilities_R7.json validation ------------------------------
   // area_facilities_R7.json is produced by tools/build_web_facilities.py
@@ -319,7 +397,7 @@ function main() {
 
   let areaMap;
   try {
-    areaMap = buildAreaMap(boundaries.data, indicators.data, demand.data);
+    areaMap = buildAreaMap(boundaries.data, indicators.data, demand.data, yoy.data);
   } catch (err) {
     fail(`buildAreaMap failed: ${err.message}`);
     return; // unreachable
@@ -343,6 +421,20 @@ function main() {
           if (typeof props[key] !== 'number' || !Number.isFinite(props[key])) {
             fail(`feature ${props.area_code} has a non-finite ${key}: ${props[key]}`);
           }
+        }
+      }
+    }
+    // YoY (R6→R7): raw plan_2025/actual_2024 are always present; the ratio
+    // keys are only present when their denominator was non-zero (omitted, not
+    // 0/Infinity — see merge.mjs buildAreaMap), so only check finiteness when
+    // the key exists at all.
+    for (const fn of BED_FUNCTIONS) {
+      if (typeof props[yoyPlanValueKey(fn)] !== 'number' || typeof props[yoyActual2024Key(fn)] !== 'number') {
+        fail(`feature ${props.area_code} is missing ${yoyPlanValueKey(fn)}/${yoyActual2024Key(fn)}`);
+      }
+      for (const key of [yoyPlanRatioKey(fn), yoyChangeRatioKey(fn)]) {
+        if (key in props && (typeof props[key] !== 'number' || !Number.isFinite(props[key]))) {
+          fail(`feature ${props.area_code} has a non-finite ${key}: ${props[key]}`);
         }
       }
     }
@@ -396,6 +488,15 @@ function main() {
   fs.writeFileSync(
     path.join(generatedDir, 'area_demand.json'),
     demand.raw.replace(/\r\n/g, '\n')
+  );
+
+  // 1c. area_yoy.json — verbatim copy (same treatment as area_indicators.json
+  //     above): bundled directly (~290KB, small enough to skip sharding) and
+  //     used by the area panel/legend/source-notes for the R6→R7 公表年度間比較
+  //     metrics.
+  fs.writeFileSync(
+    path.join(generatedDir, 'area_yoy.json'),
+    yoy.raw.replace(/\r\n/g, '\n')
   );
 
   // 2. area_map.json — compact (no pretty-printing) to keep the fetched
@@ -455,6 +556,7 @@ function main() {
   console.log(
     `[sync-data] OK: wrote area_indicators.json (${areas.length} areas), ` +
       `area_demand.json (${demandAreas.length} areas), ` +
+      `area_yoy.json (${yoyAreas.length} areas), ` +
       `area_map.json (${areaMap.features.length} features), ` +
       `area_index.json (${areaIndex.length} entries) to ${path.relative(repoRoot, generatedDir)}; ` +
       `wrote ${facilityAreas.length} facility shards ` +
@@ -464,7 +566,7 @@ function main() {
   );
 
   // 6. web/public/downloads/<BUNDLE_FILE_NAME> — data/processed/ の加工済み
-  //    CSV13本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
+  //    CSV14本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
   //    と同じ理由でディレクトリを一掃してから作り直す(収録物が減ったときに
   //    古いファイルがdistへ残らないようにするため)。
   fs.rmSync(downloadsOutDir, { recursive: true, force: true });
@@ -554,7 +656,7 @@ function main() {
 
   // 8. web/src/generated/download_manifest.json — UIがサイズ・SHA-256・収録物
   //    を表示するための軽量な一覧(bundle実体を取得しなくても内容を説明できる
-  //    ようにする)。membersは13本のCSVのみ(meta.jsonは含めない)。
+  //    ようにする)。membersは14本のCSVのみ(meta.jsonは含めない)。
   const downloadManifest = {
     bundle: {
       file: BUNDLE_FILE_NAME,

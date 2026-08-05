@@ -903,3 +903,37 @@ tr.facility-detail-row td {
   line-height: 1.5;
   margin: 4px 0 0 0;
 }
+
+/* 年度間比較テーブル（区域パネル、M7）。6列（病床機能＋数値5列）を
+   width: 100% で幅360pxのパネルに押し込むと数値が詰まって読めなくなる
+   （罠22）ため、bulk-download-table/facility-tableと同じ扱いで
+   width: max-content にし、はみ出しは横スクロールへ逃がす。 */
+.yoy-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 6px;
+}
+
+table.yoy-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+}
+
+table.yoy-table th,
+table.yoy-table td {
+  text-align: right;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-rule);
+  white-space: nowrap;
+}
+
+table.yoy-table th:first-child,
+table.yoy-table td:first-child {
+  text-align: left;
+}
+
+table.yoy-table thead th {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}

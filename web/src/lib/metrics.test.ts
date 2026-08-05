@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { demandRatioKey as mjsDemandRatioKey, demandValueKey as mjsDemandValueKey } from '../../scripts/lib/merge.mjs';
+import {
+  demandRatioKey as mjsDemandRatioKey,
+  demandValueKey as mjsDemandValueKey,
+  yoyActual2024Key as mjsYoyActual2024Key,
+  yoyChangeRatioKey as mjsYoyChangeRatioKey,
+  yoyPlanRatioKey as mjsYoyPlanRatioKey,
+  yoyPlanValueKey as mjsYoyPlanValueKey,
+} from '../../scripts/lib/merge.mjs';
 import {
   classifyBin,
   classifyDemandRatioBin,
   classifyRatioBin,
+  classifyYoyRatioBin,
   computeQuantileEdges,
   computeRatio,
   computeSequentialClasses,
@@ -19,14 +27,26 @@ import {
   formatPercent,
   formatRatio,
   formatReceipts,
+  formatYoyChangeRatio,
+  formatYoyRatio,
   isDemandMetric,
+  isYoyMetric,
   RATIO_BIN_COLORS,
   RATIO_BIN_EDGES,
   RATIO_BIN_LABELS,
   readDemandRatio,
   readDemandValue,
+  readYoyRatio,
+  readYoyValue,
   SEQUENTIAL_RAMP_COLORS,
   selectRampColors,
+  YOY_RATIO_BIN_EDGES,
+  YOY_RATIO_BIN_LABELS,
+  YOY_UNAVAILABLE_CELL_LABEL,
+  yoyActual2024Key,
+  yoyChangeRatioKey,
+  yoyPlanRatioKey,
+  yoyPlanValueKey,
 } from './metrics';
 
 describe('computeRatio', () => {
@@ -138,6 +158,44 @@ describe('classifyDemandRatioBin', () => {
   });
 });
 
+describe('classifyYoyRatioBin', () => {
+  it('has 7 bins with matching labels, reusing the 7-color RATIO_BIN_COLORS palette', () => {
+    expect(RATIO_BIN_COLORS.length).toBe(7);
+    expect(YOY_RATIO_BIN_LABELS.length).toBe(7);
+    expect(YOY_RATIO_BIN_EDGES.length).toBe(6);
+  });
+
+  it('the edges are strictly ascending', () => {
+    for (let i = 1; i < YOY_RATIO_BIN_EDGES.length; i++) {
+      expect(YOY_RATIO_BIN_EDGES[i]).toBeGreaterThan(YOY_RATIO_BIN_EDGES[i - 1]);
+    }
+  });
+
+  it('classifies values well inside each bin', () => {
+    expect(classifyYoyRatioBin(0.5)).toBe(0);
+    expect(classifyYoyRatioBin(0.9)).toBe(1);
+    expect(classifyYoyRatioBin(0.95)).toBe(2);
+    expect(classifyYoyRatioBin(1.0)).toBe(3);
+    expect(classifyYoyRatioBin(1.05)).toBe(4);
+    expect(classifyYoyRatioBin(1.1)).toBe(5);
+    expect(classifyYoyRatioBin(2.0)).toBe(6);
+  });
+
+  it('boundary values are inclusive on the lower edge, exclusive on the upper edge', () => {
+    expect(classifyYoyRatioBin(0.85)).toBe(1);
+    expect(classifyYoyRatioBin(0.93)).toBe(2);
+    expect(classifyYoyRatioBin(0.98)).toBe(3);
+    expect(classifyYoyRatioBin(1.02)).toBe(4);
+    expect(classifyYoyRatioBin(1.075)).toBe(5);
+    expect(classifyYoyRatioBin(1.18)).toBe(6);
+  });
+
+  it('values just below a boundary stay in the lower bin', () => {
+    expect(classifyYoyRatioBin(0.8499999)).toBe(0);
+    expect(classifyYoyRatioBin(1.1799999)).toBe(5);
+  });
+});
+
 describe('isDemandMetric / demandCategoryOf', () => {
   it('is true only for the 2 demand metric kinds', () => {
     expect(isDemandMetric('demand_home_care')).toBe(true);
@@ -150,6 +208,18 @@ describe('isDemandMetric / demandCategoryOf', () => {
   it('maps each DemandMetricKind to its DemandCategoryKey', () => {
     expect(demandCategoryOf('demand_home_care')).toBe('home_care');
     expect(demandCategoryOf('demand_outpatient')).toBe('outpatient');
+  });
+});
+
+describe('isYoyMetric', () => {
+  it('is true only for the 2 YoY (R6→R7) metric kinds', () => {
+    expect(isYoyMetric('yoy_plan_vs_actual')).toBe(true);
+    expect(isYoyMetric('yoy_actual_change')).toBe(true);
+    expect(isYoyMetric('ratio')).toBe(false);
+    expect(isYoyMetric('actual')).toBe(false);
+    expect(isYoyMetric('need')).toBe(false);
+    expect(isYoyMetric('demand_home_care')).toBe(false);
+    expect(isYoyMetric('demand_outpatient')).toBe(false);
   });
 });
 
@@ -168,6 +238,47 @@ describe('demand property key helpers', () => {
     expect(demandRatioKey('home_care', 2040)).toBe('home_care_r_2040');
     expect(demandValueKey('outpatient', 2024)).toBe('outpatient_2024');
     expect(demandRatioKey('outpatient', 2024)).toBe('outpatient_r_2024');
+  });
+});
+
+describe('YoY (R6→R7) property key helpers', () => {
+  const FUNCTIONS = ['total', 'high_acute', 'acute', 'recovery', 'chronic'] as const;
+
+  it('yoyPlanRatioKey/yoyChangeRatioKey/yoyPlanValueKey/yoyActual2024Key match the merge.mjs implementation used by sync-data', () => {
+    for (const fn of FUNCTIONS) {
+      expect(yoyPlanRatioKey(fn)).toBe(mjsYoyPlanRatioKey(fn));
+      expect(yoyChangeRatioKey(fn)).toBe(mjsYoyChangeRatioKey(fn));
+      expect(yoyPlanValueKey(fn)).toBe(mjsYoyPlanValueKey(fn));
+      expect(yoyActual2024Key(fn)).toBe(mjsYoyActual2024Key(fn));
+    }
+  });
+
+  it('follow the documented naming rule', () => {
+    expect(yoyPlanRatioKey('total')).toBe('y_pa_total');
+    expect(yoyChangeRatioKey('total')).toBe('y_yy_total');
+    expect(yoyPlanValueKey('total')).toBe('y_plan_total');
+    expect(yoyActual2024Key('total')).toBe('y_a24_total');
+    expect(yoyPlanRatioKey('high_acute')).toBe('y_pa_high_acute');
+    expect(yoyChangeRatioKey('high_acute')).toBe('y_yy_high_acute');
+  });
+});
+
+describe('readYoyRatio / readYoyValue', () => {
+  const props = { y_pa_total: 1.03, y_a24_total: 5243, y_yy_high_acute: 0.7 };
+
+  it('reads a present numeric ratio for the given metric', () => {
+    expect(readYoyRatio(props, 'yoy_plan_vs_actual', 'total')).toBeCloseTo(1.03);
+    expect(readYoyRatio(props, 'yoy_actual_change', 'high_acute')).toBeCloseTo(0.7);
+  });
+
+  it('returns null (算出不可) for a missing ratio key', () => {
+    expect(readYoyRatio(props, 'yoy_actual_change', 'total')).toBeNull();
+    expect(readYoyRatio(props, 'yoy_plan_vs_actual', 'high_acute')).toBeNull();
+  });
+
+  it('readYoyValue reads a raw value by its already-built key', () => {
+    expect(readYoyValue(props, 'y_a24_total')).toBe(5243);
+    expect(readYoyValue(props, 'y_plan_total')).toBeNull();
   });
 });
 
@@ -357,5 +468,26 @@ describe('formatting', () => {
   it('formatReceipts adds thousands separators and the 件/月 unit', () => {
     expect(formatReceipts(4382.75)).toBe('4,383 件/月');
     expect(formatReceipts(0)).toBe('0 件/月');
+  });
+
+  it('formatYoyRatio shows two decimal places with a 倍 suffix', () => {
+    expect(formatYoyRatio(1.0287, 'yoy_plan_vs_actual')).toBe('1.03倍');
+    expect(formatYoyRatio(0.5, 'yoy_actual_change')).toBe('0.50倍');
+  });
+
+  it('formatYoyRatio shows a metric-specific 算出不可 label for null (unlike formatRatio, which is bed-need-specific)', () => {
+    expect(formatYoyRatio(null, 'yoy_plan_vs_actual')).toBe(YOY_UNAVAILABLE_CELL_LABEL.yoy_plan_vs_actual);
+    expect(formatYoyRatio(null, 'yoy_actual_change')).toBe(YOY_UNAVAILABLE_CELL_LABEL.yoy_actual_change);
+    expect(formatYoyRatio(null, 'yoy_plan_vs_actual')).not.toBe(formatYoyRatio(null, 'yoy_actual_change'));
+  });
+
+  it('formatYoyChangeRatio signs increases/decreases with one decimal place, like formatChangeRatio', () => {
+    expect(formatYoyChangeRatio(1.03, 'yoy_plan_vs_actual')).toBe('+3.0%');
+    expect(formatYoyChangeRatio(0.97, 'yoy_actual_change')).toBe('-3.0%');
+  });
+
+  it('formatYoyChangeRatio shows the same metric-specific 算出不可 label as formatYoyRatio for null', () => {
+    expect(formatYoyChangeRatio(null, 'yoy_plan_vs_actual')).toBe(YOY_UNAVAILABLE_CELL_LABEL.yoy_plan_vs_actual);
+    expect(formatYoyChangeRatio(null, 'yoy_actual_change')).toBe(YOY_UNAVAILABLE_CELL_LABEL.yoy_actual_change);
   });
 });
