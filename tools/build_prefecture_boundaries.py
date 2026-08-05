@@ -33,8 +33,9 @@
 (`tools/build_web_prefecture.py` の `national`)が持つ。
 
 処理内容:
-  1. `area_boundaries_R7.geojson`(339区域)・`prefecture_basic.csv`(48行、
-     全国を含む)を読み込む
+  1. `area_boundaries_R7.geojson`(339区域)・`prefecture_basic.csv`(96行=R6/R7
+     ×48行[全国含む]。都道府県名にはpublished_fy=='R7'の48行のみを使う)を
+     読み込む
   2. mapshaperで`pref_code`によるディゾルブ + `-clean`(スリバー除去・位相修復)
   3. 各フィーチャに`prefecture_basic.csv`(R7側の正)から`pref_name`を付与する
      (入力GeoJSONにも`pref_name`はあるが、名称の正は常にR7の加工CSV側)
@@ -127,9 +128,18 @@ def load_prefecture_names(path: Path = PREFECTURE_BASIC_CSV) -> dict:
     """`prefecture_basic.csv`を読み、都道府県コード -> 都道府県名の辞書を返す。
 
     全国(pref_code='00')の行は除外する(境界を作らないため)。
+
+    prefecture_basic.csvはR6/R7がpublished_fyで並存するようになった(M9)ため
+    48行(全国含む)から96行へ倍増している。境界の都道府県名は常にR7側の正を
+    使う(モジュールdocstring「処理内容」参照)ため、published_fy=='R7'の行だけに
+    絞り込んでから読む(絞り込まないと同じpref_codeがR6行とR7行の2回出て
+    「重複しています」で落ちる)。
     """
     with open(path, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
+    rows = [row for row in rows if row["published_fy"] == "R7"]
+    if not rows:
+        raise SystemExit(f"{path}: published_fy=='R7'の行がありません")
     names = {}
     for row in rows:
         code = normalize_pref_code(row["pref_code"])

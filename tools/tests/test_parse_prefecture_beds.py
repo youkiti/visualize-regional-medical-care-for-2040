@@ -169,6 +169,11 @@ def test_basic_info_national(r7):
 
 # --- 9. R6互換性(年度間の列ずれ回帰テスト) --------------------------------
 
+# R6は本番の出力経路(build_and_write)にも乗っている(prefecture_beds.csv等に
+# published_fy=='R6'の行として出力される)。このテストはヘッダー文字列の
+# 列ずれ追随(実績年数・見込量の対象年がR6/R7で異なること)を固定する
+# 回帰テストとして残す。
+
 
 def test_r6_r7_year_layout_regression():
     ws_r6, _, _ = load_sheet("R6")
@@ -184,6 +189,43 @@ def test_r6_r7_year_layout_regression():
     plan_years_r7 = sorted({r["year"] for r in result_r7.beds_rows if r["series"] == "見込量"})
     assert actual_years_r7 == [2015, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
     assert plan_years_r7 == [2026]
+
+
+# --- 11. R6を含む複数ソースの出力(--source対応) -----------------------------
+
+
+def test_build_and_write_combines_r7_then_r6_in_fixed_order(tmp_path):
+    """build_and_write(["R6", "R7"], ...)のように渡しても、出力行は常に
+    R7が先・R6が後になることを確認する(SOURCE_ORDER固定、呼び出し順に依らない)。
+    """
+    paths = build_and_write(["R6", "R7"], tmp_path)
+    beds_lines = (tmp_path / "prefecture_beds.csv").read_text(encoding="utf-8").splitlines()
+    fy_column = [line.split(",")[0] for line in beds_lines[1:]]
+    assert fy_column[0] == "R7"
+    assert fy_column[-1] == "R6"
+    # R7からR6への切り替わりは1箇所だけ(R7がまとまって先、R6がまとまって後)
+    assert len([i for i in range(1, len(fy_column)) if fy_column[i] != fy_column[i - 1]]) == 1
+
+
+def test_build_and_write_row_counts_for_r7_plus_r6(tmp_path):
+    paths = build_and_write(["R7", "R6"], tmp_path)
+    beds_rows = (tmp_path / "prefecture_beds.csv").read_text(encoding="utf-8").splitlines()
+    rate_rows = (tmp_path / "prefecture_bed_report_rate.csv").read_text(encoding="utf-8").splitlines()
+    basic_rows = (tmp_path / "prefecture_basic.csv").read_text(encoding="utf-8").splitlines()
+    assert len(beds_rows) - 1 == 2640 + 2400
+    assert len(rate_rows) - 1 == 432 + 384
+    assert len(basic_rows) - 1 == 48 + 48
+
+
+def test_build_and_write_single_source_r6_only(tmp_path):
+    paths = build_and_write(["R6"], tmp_path)
+    beds_rows = (tmp_path / "prefecture_beds.csv").read_text(encoding="utf-8").splitlines()
+    assert len(beds_rows) - 1 == 2400
+    assert all(line.startswith("R6,") for line in beds_rows[1:])
+
+    meta = json.loads((tmp_path / "prefecture_beds.csv.meta.json").read_text(encoding="utf-8"))
+    assert isinstance(meta["source"], list)
+    assert [s["published_fy"] for s in meta["source"]] == ["R6"]
 
 
 # --- レイアウト崩れ検知(LayoutMismatchError) -----------------------------
@@ -224,9 +266,12 @@ CSV_NAMES = [
 
 
 def test_reproducibility_byte_identical(tmp_path):
-    paths = build_and_write("R7", tmp_path)
+    # data/processed/ にコミット済みのCSVは既定(--source all = R7+R6)で
+    # 生成したものなので、再現性テストも同じソース集合で再生成して比較する。
+    paths = build_and_write(["R7", "R6"], tmp_path)
     assert paths.keys() == {"beds", "report_rate", "basic"}
-    expected_sha256 = recorded_hash("R7/001722915.xlsx")
+    expected_sha256_r7 = recorded_hash("R7/001722915.xlsx")
+    expected_sha256_r6 = recorded_hash("R6/別添４②（都道府県の病床数等の状況）.xlsx")
 
     for name in CSV_NAMES:
         committed_path = PROCESSED_DIR / name
@@ -241,8 +286,12 @@ def test_reproducibility_byte_identical(tmp_path):
         new_meta = json.loads((tmp_path / f"{name}.meta.json").read_text(encoding="utf-8"))
         old_meta = json.loads((PROCESSED_DIR / f"{name}.meta.json").read_text(encoding="utf-8"))
 
-        assert new_meta["source"]["source_sha256"] == expected_sha256
-        assert old_meta["source"]["source_sha256"] == expected_sha256
+        for meta in (new_meta, old_meta):
+            assert isinstance(meta["source"], list)
+            by_fy = {s["published_fy"]: s for s in meta["source"]}
+            assert set(by_fy) == {"R7", "R6"}
+            assert by_fy["R7"]["source_sha256"] == expected_sha256_r7
+            assert by_fy["R6"]["source_sha256"] == expected_sha256_r6
 
         # processing.date は実行日ごとに変わるため、比較対象から除外する
         new_meta["processing"]["date"] = None

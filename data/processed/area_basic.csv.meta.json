@@ -1,39 +1,64 @@
 {
-  "title": "構想区域別 基礎情報(2020年人口・面積・推計流出入患者割合)",
-  "source": {
-    "name": "②構想区域の病床数等（別添４）",
-    "publisher": "厚生労働省",
-    "url": "https://www.mhlw.go.jp/content/10800000/001723349.xlsx",
-    "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html",
-    "fiscal_year": "令和7年度（2025年度）",
-    "source_file": "R7/001723349.xlsx",
-    "source_sha256": "f7e0e1495c05f3d3fe7456d9e6250cb639d9f70305b391d7d6ba3d230762eca9",
-    "source_sheet": "構想区域別必要量との比較",
-    "acquired_date": "2026-08-04",
-    "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html",
-    "original_title": "構想区域別の病床機能報告上の病床数及び地域医療構想における将来の病床数の必要量等（病床機能報告等）",
-    "original_notes": [
-      "※厚生労働省ホームページにおいて公表している病床機能報告の報告結果等を用いて集計。",
-      "　一方で、都道府県において、必要に応じて、これらの報告結果等の更新等を行っている場合もあり、各数値は、都道府県の保有データと一致しない場合があることに留意。",
-      "※病床機能報告の集計結果と将来の病床数の必要量は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要。",
-      "※年度ごとに報告率が異なることに留意が必要。"
-    ]
-  },
+  "title": "構想区域別 基礎情報(2020年人口・面積・流出入関連)",
+  "source": [
+    {
+      "published_fy": "R7",
+      "name": "②構想区域の病床数等（別添４）",
+      "publisher": "厚生労働省",
+      "url": "https://www.mhlw.go.jp/content/10800000/001723349.xlsx",
+      "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html",
+      "fiscal_year": "令和7年度（2025年度）",
+      "source_file": "R7/001723349.xlsx",
+      "source_sha256": "f7e0e1495c05f3d3fe7456d9e6250cb639d9f70305b391d7d6ba3d230762eca9",
+      "source_sheet": "構想区域別必要量との比較",
+      "acquired_date": "2026-08-04",
+      "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html",
+      "original_title": "構想区域別の病床機能報告上の病床数及び地域医療構想における将来の病床数の必要量等（病床機能報告等）",
+      "original_notes": [
+        "※厚生労働省ホームページにおいて公表している病床機能報告の報告結果等を用いて集計。",
+        "　一方で、都道府県において、必要に応じて、これらの報告結果等の更新等を行っている場合もあり、各数値は、都道府県の保有データと一致しない場合があることに留意。",
+        "※病床機能報告の集計結果と将来の病床数の必要量は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要。",
+        "※年度ごとに報告率が異なることに留意が必要。"
+      ]
+    },
+    {
+      "published_fy": "R6",
+      "name": "別添４③（構想区域の病床数等の状況）",
+      "publisher": "厚生労働省",
+      "url": "https://www.mhlw.go.jp/content/10800000/001723128.zip",
+      "source_note": "令和6年度版一括DL zip に同梱(xlsx単体の直リンクではない)",
+      "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html",
+      "fiscal_year": "令和6年度",
+      "source_file": "R6/別添４③（構想区域の病床数等の状況）.xlsx",
+      "source_sha256": "00407483f48ff03babe92d386aaa6cd6e50305a77083f69a67b58540c50ed0ed",
+      "source_sheet": "構想区域別必要量との比較",
+      "acquired_date": "2026-08-05",
+      "license": "厚生労働省ホームページ利用規約（政府標準利用規約準拠） https://www.mhlw.go.jp/chosakuken/index.html",
+      "original_title": "都道府県別・構想区域別の病床機能報告上の病床数及び地域医療構想における将来の病床数の必要量等",
+      "original_notes": [
+        "※厚生労働省ホームページにおいて公表している病床機能報告の報告結果等を用いて集計。",
+        "　一方で、都道府県において、必要に応じて、これらの報告結果等の更新等を行っている場合もあり、各数値は、都道府県の保有データと一致しない場合があることに留意。",
+        "※病床機能報告の集計結果と将来の病床数の必要量は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要。",
+        "※年度ごとに報告率が異なることに留意が必要。"
+      ]
+    }
+  ],
   "processing": {
     "script": "tools/parse_area_beds.py",
-    "date": "2026-08-04",
+    "date": "2026-08-05",
     "steps": [
       "openpyxl(data_only=True)でシートを開き、3行目から15行ずつの339ブロック(構想区域ごと)を走査",
       "サブヘッダー行(実績/見込量/必要数の列見出し)の文字列から列を解決(公表年度により列位置が異なるためハードコードしない)",
       "全339ブロックのサブヘッダー行が先頭ブロックと完全一致することを検証(不一致ならレイアウト変更とみなし中断)",
       "人口(万人)を10000倍し四捨五入して人単位に変換(population_2020)。原典値は population_2020_source_value に保持",
       "面積の浮動小数点誤差を除くため小数2桁に丸め(area_2020_km2)",
-      "推計流出/流入患者割合は原典が数値の場合のみ採用し、'XXX'等の非数値は空にして原典値を*_source_valueに保持"
+      "流出入関連(R7=推計流出/流入患者割合、R6=一般病床患者流出入)は原典が数値の場合のみ採用し、'XXX'等の非数値は空にして原典値を*_source_valueに保持。年度により算出されない列は常に空",
+      "複数の公表年度(--source)を対象にする場合、行はR7を先に・R6を後に固定した順で連結する(R7部分をバイト単位で不変に保ち、差分でR6の追加だけが読めるようにするため)"
     ],
     "caveat": "病床機能報告の集計結果(実績)と将来の病床数の必要量(必要数)は計算方法が異なることから、単純に比較するのではなく、詳細な分析や検討を行った上で地域医療構想調整会議で協議を行うことが重要(原典C2注記より)。可視化でこれらを併記する際は、この点を注記として必ず表示すること。また年度ごとに報告率が異なることにも留意する。"
   },
   "fields": {
-    "published_fy": "公表年度を表す識別子。'R7'=令和7年度公表分。将来R6等の行を追加する際のキー",
+    "published_fy": "公表年度を表す識別子。'R7'=令和7年度公表分、'R6'=令和6年度公表分。行の出典はmeta.jsonのsource配列をpublished_fyで引くこと",
     "pref_code": "都道府県コード(ゼロ埋め2桁の文字列、01=北海道…47=沖縄県、原典の都道府県コード順)",
     "pref_name": "都道府県名",
     "area_code": "構想区域(二次医療圏)コード(ゼロ埋め4桁の文字列)。上2桁が都道府県コードと一致する",
@@ -42,10 +67,12 @@
     "population_2020_source_value": "原典の人口値(万人単位、丸めなし)",
     "population_2020_source_unit": "population_2020_source_value の単位(万人)",
     "area_2020_km2": "2020年面積(km2)。原典の浮動小数点誤差を除くため小数2桁に丸め",
-    "outflow_rate": "推計流出患者割合(0〜1)。原典が数値の場合のみ値を持つ。三重県の8区域では原典が'XXX'のため空(outflow_rate_source_value参照)",
-    "outflow_rate_source_value": "推計流出患者割合の原典値(数値または'XXX'をそのまま)",
-    "inflow_rate": "推計流入患者割合(0〜1)。原典が数値の場合のみ値を持つ。三重県の8区域では原典が'XXX'のため空(inflow_rate_source_value参照)",
-    "inflow_rate_source_value": "推計流入患者割合の原典値(数値または'XXX'をそのまま)"
+    "outflow_rate": "推計流出患者割合(0〜1)。R7のみ算出(R6行は常に空)。原典が数値の場合のみ値を持つ。三重県の8区域では原典が'XXX'のため空(outflow_rate_source_value参照)",
+    "outflow_rate_source_value": "推計流出患者割合の原典値(数値または'XXX'をそのまま。R6行は常に空)",
+    "inflow_rate": "推計流入患者割合(0〜1)。R7のみ算出(R6行は常に空)。原典が数値の場合のみ値を持つ。三重県の8区域では原典が'XXX'のため空(inflow_rate_source_value参照)",
+    "inflow_rate_source_value": "推計流入患者割合の原典値(数値または'XXX'をそのまま。R6行は常に空)",
+    "net_flow_rate": "一般病床患者流出入(-1〜1、負値を取りうる)。R6のみ算出(R7行は常に空)。原典が数値の場合のみ値を持つ。三重県の8区域では原典が'XXX'のため空(net_flow_rate_source_value参照)。**outflow_rate/inflow_rate(R7)とは別概念であり、並べて比較・可視化してはならない**(area_basic_r6_net_flow_rate_different_concept参照)",
+    "net_flow_rate_source_value": "一般病床患者流出入の原典値(数値または'XXX'をそのまま。R7行は常に空)"
   },
   "known_issues": [
     {
@@ -63,13 +90,31 @@
           "2412"
         ]
       },
-      "summary": "三重県の8構想区域(2405〜2412)のみ、推計流出患者割合・推計流入患者割合が原典で文字列'XXX'(未算出)になっている",
+      "summary": "三重県の8構想区域(2405〜2412)のみ、R7の推計流出患者割合・推計流入患者割合とR6の一般病床患者流出入が、いずれも原典で文字列'XXX'(未算出)になっている",
       "evidence": [
-        "他331区域は0〜1の数値だが、三重県の8区域のみ'XXX'",
+        "R7: 他331区域はoutflow_rate/inflow_rateが0〜1の数値だが、三重県の8区域のみ'XXX'",
+        "R6: 同じ8区域でnet_flow_rateも'XXX'",
         "三重県は令和2年度時点の二次医療圏4圏域から令和7年度の構想区域では8区域へ細分化されており、細分化後の区域単位での流出入率が算出されていない"
       ],
-      "action": "outflow_rate/inflow_rateは空(欠測)とし、原典値はoutflow_rate_source_value/inflow_rate_source_valueに'XXX'のまま保持している"
+      "action": "outflow_rate/inflow_rate/net_flow_rateはいずれも空(欠測)とし、原典値は各*_source_valueに'XXX'のまま保持している"
+    },
+    {
+      "id": "area_basic_r6_net_flow_rate_different_concept",
+      "scope": {
+        "csv": "area_basic.csv",
+        "published_fy": "R6",
+        "columns": [
+          "net_flow_rate",
+          "net_flow_rate_source_value"
+        ]
+      },
+      "summary": "R6公表分(別添４③)のQ列(17)「（一般病床患者流出入）」は、R7の推計流出患者割合・推計流入患者割合(2つの別項目)とは別概念であり、値域も-0.893〜0.434と負値を含む(R7は0〜1)",
+      "evidence": [
+        "R7は推計流出患者割合・推計流入患者割合の2項目を別々の値として持つが、R6は「（一般病床患者流出入）」という単一の値のみを持つ",
+        "R6のnet_flow_rateの実測値域は-0.893〜0.434で負の値を取る。R7のoutflow_rate/inflow_rateは0〜1の値域"
+      ],
+      "action": "outflow_rate/inflow_rate(R7)とnet_flow_rate(R6)は別概念のため、並べて比較・可視化してはならない"
     }
   ],
-  "row_count": 339
+  "row_count": 678
 }

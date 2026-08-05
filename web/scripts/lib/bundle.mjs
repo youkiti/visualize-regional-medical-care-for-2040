@@ -1,4 +1,4 @@
-// data/processed/ の加工済みCSV15本を1本のZIPにまとめて配布するための、
+// data/processed/ の加工済みCSV16本を1本のZIPにまとめて配布するための、
 // ZIP本文（MANIFEST.tsv・README.md）を組み立てる純関数群。I/Oはしない
 // （実際にファイルを読み書き・ZIP化するのは web/scripts/sync-data.mjs）。
 //
@@ -6,12 +6,12 @@
 // vitest (web/src/lib/bundle.test.ts) and reused from web/scripts/sync-data.mjs.
 
 /** ZIP内のルートフォルダ名。全エントリはこの下に置く（展開すると1フォルダにまとまる）。 */
-export const BUNDLE_ROOT = 'chiiki-iryo-koso_processed-csv_R7';
+export const BUNDLE_ROOT = 'chiiki-iryo-koso_processed-csv_R6_R7';
 
 /** web/public/downloads/ に書き出すZIPファイル名。 */
-export const BUNDLE_FILE_NAME = 'chiiki-iryo-koso_processed-csv_R7.zip';
+export const BUNDLE_FILE_NAME = 'chiiki-iryo-koso_processed-csv_R6_R7.zip';
 
-// data/processed/ にある加工済みCSV15本を明示的に列挙する（ディレクトリを走査
+// data/processed/ にある加工済みCSV16本を明示的に列挙する（ディレクトリを走査
 // して拾うのではなく、この配列を正とする）。sync-data.mjs はこの配列と実際の
 // data/processed/*.csv の一覧を突合し、食い違ったらビルドを落とす
 // （新しいCSVが増えたときに黙って配布物から漏れる／意図しないファイルが
@@ -21,6 +21,7 @@ export const BUNDLE_CSV_FILES = [
   'area_bed_report_rate.csv',
   'area_beds.csv',
   'area_geo_join.csv',
+  'area_yoy_diff.csv',
   'demand_forecast.csv',
   'demand_population.csv',
   'facility_basic.csv',
@@ -69,41 +70,69 @@ export function buildManifestTsv(members) {
 
 /**
  * @typedef {{
+ *   published_fy?: string,
+ *   name: string,
+ *   publisher?: string,
+ *   source_file?: string,
+ *   source_sha256?: string,
+ *   page_url?: string,
+ *   acquired_date?: string,
+ *   license?: string,
+ *   inputs?: BundleSourceInput[],
+ * }} BundleSourceEntry
+ */
+
+/**
+ * @typedef {{
  *   name: string,
  *   title: string,
  *   rows: number,
- *   source: {
- *     name: string,
- *     publisher?: string,
- *     source_file?: string,
- *     source_sha256?: string,
- *     page_url?: string,
- *     acquired_date?: string,
- *     license?: string,
- *     inputs?: BundleSourceInput[],
- *   },
+ *   source: BundleSourceEntry | BundleSourceEntry[],
  *   known_issues?: Array<{ id: string, summary: string, action: string, evidence?: unknown[] }>,
  * }} BundleCsvInfo
  */
 
 /**
+ * `file.source` を常に配列として扱うためのヘルパ。単一の出典を持つCSV
+ * （dict形式、従来からの形）は1要素の配列に包む。複数年度の出典を持つCSV
+ * （area_beds.csv等、`published_fy` 付きのdictのリスト。CLAUDE.md参照）は
+ * そのまま返す。
+ *
+ * @param {BundleCsvInfo['source']} source
+ * @returns {BundleSourceEntry[]}
+ */
+function sourceEntries(source) {
+  return Array.isArray(source) ? source : [source];
+}
+
+/**
  * 原典（source_fileがある場合はそれ、無い場合はsource.name）でCSVをグルーピング
  * する。同じ原典を共有する複数CSVは1つの出典ブロックにまとめる。出現順を保つ。
  *
+ * `source` が配列（複数の公表年度を持つCSV）の場合、各要素をそれぞれ1つの
+ * 原典として扱う（`source[0]` だけを見て済ませない）。そのCSVは年度の数だけ
+ * 複数の出典ブロックに登場しうる（例: area_beds.csvはR7ブロックとR6ブロックの
+ * 両方の「このZIPでの収録」に載る）。年度ごとに`source_file`が異なるため、
+ * グルーピングキー自体は自然に年度ごとに分かれる。
+ *
  * @param {BundleCsvInfo[]} files
- * @returns {Array<{ source: BundleCsvInfo['source'], members: string[] }>}
+ * @returns {Array<{ source: BundleSourceEntry, members: string[] }>}
  */
 function groupBySource(files) {
-  /** @type {Map<string, { source: BundleCsvInfo['source'], members: string[] }>} */
+  /** @type {Map<string, { source: BundleSourceEntry, members: string[] }>} */
   const groups = new Map();
   for (const file of files) {
-    const key = file.source.source_file ?? `derived::${file.source.name}`;
-    let group = groups.get(key);
-    if (!group) {
-      group = { source: file.source, members: [] };
-      groups.set(key, group);
+    for (const entry of sourceEntries(file.source)) {
+      const key = entry.source_file ?? `derived::${entry.name}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { source: entry, members: [] };
+        groups.set(key, group);
+      }
+      if (!group.members.includes(file.name)) {
+        group.members.push(file.name);
+      }
     }
-    group.members.push(file.name);
   }
   return [...groups.values()];
 }
@@ -175,6 +204,7 @@ export function buildBundleReadme(input) {
     const { source, members } = group;
     lines.push(`### ${source.name}`);
     lines.push('');
+    if (source.published_fy) lines.push(`- 公表年度区分: ${source.published_fy}`);
     if (source.publisher) lines.push(`- 公表元: ${source.publisher}`);
     if (source.source_file && source.source_sha256) {
       lines.push(`- 原典ファイル: ${source.source_file}（SHA-256: ${source.source_sha256}）`);
@@ -270,12 +300,12 @@ export function buildBundleReadme(input) {
   lines.push('');
   lines.push(
     '国土数値情報「医療圏データ」`ksj/A38-20/A38-20_GML.zip`（約1.13GB）は容量の都合で' +
-      'リポジトリに含まれていません（Git管理外）。このZIP内の15本のCSVのうち' +
-      '**`area_geo_join.csv` を除く14本**はこのファイルなしで再現できます。'
+      'リポジトリに含まれていません（Git管理外）。このZIP内の16本のCSVのうち' +
+      '**`area_geo_join.csv` を除く15本**はこのファイルなしで再現できます。'
   );
   lines.push('');
 
-  lines.push('### 1. `area_geo_join.csv` を除く14本');
+  lines.push('### 1. `area_geo_join.csv` を除く15本');
   lines.push('');
   lines.push('```bash');
   lines.push(`git clone ${repoUrl}.git`);
@@ -283,6 +313,7 @@ export function buildBundleReadme(input) {
   lines.push('pip install -r requirements.txt');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_prefecture_beds.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_area_beds.py');
+  lines.push('PYTHONIOENCODING=utf-8 python tools/verify_yoy_R6_R7.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_demand_forecast.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_facility_beds.py');
   lines.push('PYTHONIOENCODING=utf-8 python tools/parse_patient_flow.py');

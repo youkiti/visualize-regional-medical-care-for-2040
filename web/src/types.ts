@@ -105,6 +105,30 @@ export interface AreaMapFeatureProperties {
   a_chronic: number;
   n_chronic: number;
   r_chronic?: number;
+  // YoY (R6→R7公表年度間比較): y_plan_<fn>/y_a24_<fn>（見込量2025(R6)/実績2024(R6)の
+  // 生値）は常に存在する。y_pa_<fn>（実績2025÷見込量2025）/y_yy_<fn>（実績2025÷
+  // 実績2024）は分母が0の区域ではキー自体が省略される（r_<fn>と同じ「0でも∞でも
+  // ない算出不可」の表現規約。web/scripts/lib/merge.mjs参照）。
+  y_plan_total: number;
+  y_a24_total: number;
+  y_pa_total?: number;
+  y_yy_total?: number;
+  y_plan_high_acute: number;
+  y_a24_high_acute: number;
+  y_pa_high_acute?: number;
+  y_yy_high_acute?: number;
+  y_plan_acute: number;
+  y_a24_acute: number;
+  y_pa_acute?: number;
+  y_yy_acute?: number;
+  y_plan_recovery: number;
+  y_a24_recovery: number;
+  y_pa_recovery?: number;
+  y_yy_recovery?: number;
+  y_plan_chronic: number;
+  y_a24_chronic: number;
+  y_pa_chronic?: number;
+  y_yy_chronic?: number;
   bb_w: number;
   bb_s: number;
   bb_e: number;
@@ -128,7 +152,9 @@ export interface AreaIndexEntry {
 
 export type BedMetricKind = 'ratio' | 'actual' | 'need';
 export type DemandMetricKind = 'demand_home_care' | 'demand_outpatient';
-export type MetricKind = BedMetricKind | DemandMetricKind;
+/** 公表年度間比較（R6→R7）。area_yoy_R6_R7.json / generated/area_yoy.json 由来。 */
+export type YoyMetricKind = 'yoy_plan_vs_actual' | 'yoy_actual_change';
+export type MetricKind = BedMetricKind | DemandMetricKind | YoyMetricKind;
 
 export interface MetricOption {
   kind: MetricKind;
@@ -209,6 +235,87 @@ export interface AreaDemandData {
   year_labels: Record<string, string>;
   baseline_year: number;
   areas: AreaDemandArea[];
+}
+
+// ---- YoY (R6→R7 公表年度間比較) (area_yoy_R6_R7.json / generated/area_yoy.json) --
+//
+// Mirrors data/processed/area_yoy_R6_R7.json (tools/build_web_yoy.py, M9).
+// Deliberately NOT reusing AreaIndicators*/AreaDemand*/FacilitySummary* above
+// — this dataset's metadata has yet another shape (CLAUDE.md「可視化実装で
+// 判明した罠」11): `source` is an array of exactly 2 entries (R7 then R6,
+// each carrying its own `published_fy`) rather than a single object or a
+// per-sheet array of strings, and `processing.caveat` is a single string
+// (like AreaIndicatorsProcessing, unlike AreaDemandProcessing/
+// FacilityProcessing's multi-key objects).
+
+export interface AreaYoyBeds {
+  /** R6公表分の2025年見込量（床）。実績2025（R7公表分）とは公表回が異なる見込み値。 */
+  plan_2025: number;
+  /** R7公表分の2025年実績病床数（床）。 */
+  actual_2025: number;
+  /** R6公表分の2024年実績病床数（床）。R7公表分の同列は既知欠陥（2025年実績の複製）のため未採用。 */
+  actual_2024: number;
+}
+
+export interface AreaYoyArea {
+  area_code: string;
+  area_name: string;
+  pref_code: string;
+  pref_name: string;
+  /** R6公表分の2024年病床機能報告の報告率（0〜1）。 */
+  report_rate_2024: number;
+  /** R7公表分の2025年病床機能報告の報告率（0〜1）。 */
+  report_rate_2025: number;
+  beds: Record<BedFunctionKey, AreaYoyBeds>;
+}
+
+/**
+ * `source[]` の1要素。R7/R6の2要素配列で並ぶ（source[0]がR7、source[1]がR6 —
+ * ただし取り違えを避けるため描画側は必ず `published_fy` で判別すること）。
+ * AreaIndicatorsSource/AreaDemandSource/FacilitySourceのいずれとも異なり
+ * `derived_via` を持たない。
+ */
+export interface AreaYoySourceEntry {
+  published_fy: 'R7' | 'R6';
+  name: string;
+  publisher: string;
+  url: string;
+  /** R6のみ: 一括DL zip 経由であることの注記（xlsx単体への直リンクではない）。 */
+  source_note?: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  source_sheet: string;
+  acquired_date: string;
+  license: string;
+  original_title: string;
+  original_notes: string[];
+}
+
+export interface AreaYoyProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 単一文字列（AreaIndicatorsProcessing.caveatと同形）。見込量2025がR6公表時点の
+   * 見込みであること・報告率が年度により異なることの注記を含む。 */
+  caveat: string;
+}
+
+export interface AreaYoyMetadata {
+  title: string;
+  /** R7/R6の2要素配列。source[0]だけ描画するとR6の出典が画面から消える（罠11）。 */
+  source: AreaYoySourceEntry[];
+  processing: AreaYoyProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface AreaYoyData {
+  metadata: AreaYoyMetadata;
+  functions: BedFunctionKey[];
+  function_labels: Record<BedFunctionKey, string>;
+  areas: AreaYoyArea[];
 }
 
 // ---- Facility roster (area_facilities_R7.json / generated/facility_summary.json
@@ -356,7 +463,7 @@ export interface DownloadManifestBundle {
   sha256: string;
   /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
   entry_count: number;
-  /** ZIP内のCSV本数（15）。entry_countとは別に持つ: UIの「CSV15本＋…」表記に使う。 */
+  /** ZIP内のCSV本数（16）。entry_countとは別に持つ: UIの「CSV16本＋…」表記に使う。 */
   csv_count: number;
 }
 

@@ -23,13 +23,17 @@
 
 ## R6/ — 令和6年度版（別添資料）
 
-| ファイル | 内容 | 入手元（推定） |
+取得日: 2026-08-05
+
+| ファイル | 内容 | 入手元 |
 |---|---|---|
-| 別添４①（構想区域の病床数等の状況）.pdf | 別添4の説明資料 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) と推定（要確認） |
-| 別添４②（都道府県の病床数等の状況）.xlsx | R7の①に対応 | 同上 |
-| 別添４③（構想区域の病床数等の状況）.xlsx | R7の②に対応 | 同上 |
-| 別添５①（構想区域の詳細状況）.pdf | 別添5の説明資料 | 同上 |
-| 別添５②（構想区域の詳細状況）.xlsx | R7の③に対応 | 同上 |
+| 別添４①（構想区域の病床数等の状況）.pdf | 別添4の説明資料 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) に同梱 |
+| 別添４②（都道府県の病床数等の状況）.xlsx | R7の①に対応 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) に同梱 |
+| 別添４③（構想区域の病床数等の状況）.xlsx | R7の②に対応 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) に同梱 |
+| 別添５①（構想区域の詳細状況）.pdf | 別添5の説明資料 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) に同梱 |
+| 別添５②（構想区域の詳細状況）.xlsx | R7の③に対応 | 令和6年度版一括DL [001723128.zip](https://www.mhlw.go.jp/content/10800000/001723128.zip) に同梱 |
+
+zip自身のSHA-256: `0889fa8fe48daf719b41bed45edb7dd29b952e16fdf25853264c14d3cf30f39f`（4,746,085 bytes）。取得日: 2026-08-05。zip内の各ファイルが `SHA256SUMS` の記録値と一致することを `tools/verify_r6_bundle.py` で確認済み（2026-08-05）。上記5ファイル個別のSHA-256は `SHA256SUMS` を参照。
 
 ## ksj/ — 国土数値情報（国土交通省）ジオデータ
 
@@ -68,12 +72,16 @@
 | ファイル | 内容 | 元データ | 再生成コマンド |
 |---|---|---|---|
 | iryoken2_A38-20.geojson | 二次医療圏境界の簡略化GeoJSON（335医療圏、約6.7MB、表示専用） | ksj/A38-20/A38-20_GML.zip 内 A38-20_2.shp | `python tools/build_iryoken2_geojson.py`（要 Node.js。実行時に元zipのSHA-256を検証） |
-| prefecture_beds.csv | 都道府県別 病床数（実績/見込量/必要数 × 5機能 × 年、2,640行） | R7/001722915.xlsx | `python tools/parse_prefecture_beds.py` |
-| prefecture_bed_report_rate.csv | 都道府県別 病床機能報告の報告率（432行） | R7/001722915.xlsx | 同上（同じ実行で3ファイルまとめて出力） |
-| prefecture_basic.csv | 都道府県別 基礎情報（2020年人口・面積、48行） | R7/001722915.xlsx | 同上 |
+| prefecture_beds.csv | 都道府県別 病床数（実績/見込量/必要数 × 5機能 × 年、R7+R6で5,040行） | R7/001722915.xlsx・R6/別添４②（都道府県の病床数等の状況）.xlsx | `python tools/parse_prefecture_beds.py`（`--source all`が既定でR7・R6の両方を出力） |
+| prefecture_bed_report_rate.csv | 都道府県別 病床機能報告の報告率（R7+R6で816行） | R7/001722915.xlsx・R6/別添４②（都道府県の病床数等の状況）.xlsx | 同上（同じ実行で3ファイルまとめて出力） |
+| prefecture_basic.csv | 都道府県別 基礎情報（2020年人口・面積、R7+R6で96行） | R7/001722915.xlsx・R6/別添４②（都道府県の病床数等の状況）.xlsx | 同上 |
 | demand_forecast.csv | 構想区域別 医療需要推計（在宅（訪問診療）・外来のレセプト件数/月、2024〜2050年度、4,068行） | R7/001728462.xlsx | `python tools/parse_demand_forecast.py` |
 | demand_population.csv | 構想区域別 人口（2024年度・2040年、需要推計の参考情報、339行） | R7/001728462.xlsx | 同上（同じ実行で2ファイルまとめて出力） |
 | area_demand_R7.json | 構想区域別 医療需要推計（在宅（訪問診療）・外来のレセプト件数/月、2024〜2050年度、可視化サイト表示用、339区域） | demand_forecast.csv・demand_population.csv・area_boundaries_R7.geojson | `python tools/build_web_demand.py` |
+| area_yoy_diff.csv | 構想区域別 病床数の年度間比較（見込量2025(R6)・実績2025(R7)・実績2024(R6) 等、339区域×5機能=1,695行） | area_beds.csv・area_bed_report_rate.csv・area_basic.csv・prefecture_beds.csv | `python tools/verify_yoy_R6_R7.py`（`doc/YOY_VERIFICATION.md`も同時生成） |
+| area_yoy_R6_R7.json | 構想区域別 病床数の年度間比較の可視化サイト表示用データセット（見込量2025(R6)・実績2025(R7)・実績2024(R6)、339区域） | area_beds.csv・area_bed_report_rate.csv・area_boundaries_R7.geojson | `python tools/build_web_yoy.py` |
+
+`prefecture_*.csv`・`area_beds.csv`・`area_bed_report_rate.csv`・`area_basic.csv` はいずれも `published_fy` 列（`R7`/`R6`）でR7・R6を1本のCSVに並存させている（M9）。突合の結論は `doc/YOY_VERIFICATION.md`（`tools/verify_yoy_R6_R7.py` が生成）にまとめてある。`area_basic.csv` はR6行のみ `net_flow_rate` 列（「（一般病床患者流出入）」、値域-0.893〜0.434）を持ち、R7行のみの `outflow_rate`/`inflow_rate`（推計流出/流入患者割合、値域0〜1）とは別概念のため並べて比較・可視化してはならない（詳細は `CLAUDE.md`「パース時の注意」参照）。
 
 加工内容の要点（詳細はファイル内 `metadata.processing` または `.meta.json` の `processing` 参照）:
 

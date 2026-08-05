@@ -49,7 +49,12 @@
   5. UTF-8・LF・`ensure_ascii=False`・indent=2・末尾改行1つで出力する
 
 検証1〜13:
-   1. 6CSVの全行が published_fy == 'R7'
+   1. prefecture_beds.csv・prefecture_basic.csv・area_beds.csv・area_basic.csvを
+      published_fy == 'R7' の行だけに絞り込む(この4CSVはR6/R7がpublished_fyで
+      並存するようになった[M9]ため、まずこのデータセットが対象とするR7行だけに
+      絞ってから以降の検証・抽出を行う。tools/build_web_data.pyの同名の絞り込みに
+      倣う)。demand_forecast.csv・demand_population.csvはpublished_fyが常に'R7'
+      のみだが、同じ扱いに揃える
    2. prefecture_beds.csv の (pref_code, bed_function, series, year) に重複がない
    3. pref_code集合の整合: prefecture_beds.csv / prefecture_basic.csv が48件
       (全国00を含む)、prefecture_boundaries_R7.geojson が47件、
@@ -256,6 +261,32 @@ def _select(d: dict, keys) -> dict:
     return {k: d[k] for k in keys}
 
 
+def _r7_source(meta: dict, label: str) -> dict:
+    """`<csv>.meta.json` の `source` から published_fy=='R7' の要素を返す。
+
+    prefecture_beds.csv・prefecture_basic.csvはR6/R7が published_fy で並存する
+    ようになった(M9)ため `source` がリストになっている。本データセット
+    (prefecture_indicators_R7.json)はR7のみで構成されるため、R7の出典情報だけを
+    取り出す(tools/build_web_data.pyの同名関数と同じ挙動)。
+    """
+    for entry in meta["source"]:
+        if entry.get("published_fy") == "R7":
+            return entry
+    raise SystemExit(f"{label}: sourceにpublished_fy=='R7'の要素が見つかりません")
+
+
+def _filter_known_issues_for_r7(issues: list) -> list:
+    """`known_issues` から、scope.published_fy が明示的に'R7'以外(=R6行についての
+    既知の欠陥)になっている項目を除外する。published_fyキーが無い項目は両年度に
+    当てはまるため残す(tools/build_web_data.pyの同名関数と同じ挙動)。
+
+    現時点でprefecture_beds.csv.meta.json・prefecture_basic.csv.meta.jsonに
+    R6限定のknown_issuesは登録されていないが、将来登録されたときに画面へ
+    誤誘導が漏れないよう同じ絞り込みを掛けておく。
+    """
+    return [issue for issue in issues if issue.get("scope", {}).get("published_fy", "R7") == "R7"]
+
+
 def _load_geojson_pref(path: Path):
     """境界GeoJSONから {pref_code: pref_name} を読む(ジオメトリは読まない)。"""
     with open(path, "r", encoding="utf-8") as f:
@@ -263,12 +294,22 @@ def _load_geojson_pref(path: Path):
     return {feat["properties"]["pref_code"]: feat["properties"]["pref_name"] for feat in gj["features"]}
 
 
-def validate_published_fy(rows_by_name: dict) -> None:
-    """検証1: 全CSVの全行が published_fy == 'R7'。"""
+def filter_r7_rows(rows_by_name: dict) -> dict:
+    """検証1: published_fy=='R7'の行だけに絞り込む。
+
+    prefecture_beds.csv・prefecture_basic.csv・area_beds.csv・area_basic.csvは
+    R6/R7がpublished_fyで並存するようになった(M9)ため、まずこのデータセットが
+    対象とするR7行だけに絞ってから以降の検証・抽出を行う
+    (tools/build_web_data.pyの同名の絞り込みに倣う)。demand_forecast.csv・
+    demand_population.csvはpublished_fyが常に'R7'のみだが、同じ扱いに揃える。
+    """
+    filtered = {}
     for name, rows in rows_by_name.items():
-        bad = sorted({r["published_fy"] for r in rows} - {"R7"})
-        if bad:
-            raise SystemExit(f"検証1失敗: {name}にR7以外のpublished_fyがあります: {bad}")
+        r7_rows = [r for r in rows if r["published_fy"] == "R7"]
+        if not r7_rows:
+            raise SystemExit(f"検証1失敗: {name}にpublished_fy=='R7'の行がありません")
+        filtered[name] = r7_rows
+    return filtered
 
 
 def validate_and_index_beds(pref_beds_rows, pref_basic_rows, geo_pref, area_basic_rows, area_beds_rows):
@@ -642,9 +683,15 @@ def build_metadata(metas: dict, inputs: list) -> dict:
     ため、`source`は1つではなく`source_beds`/`source_demand`の2ブロックに分ける
     (CLAUDE.md「可視化実装で判明した罠」11 — 表示用JSONを増やすとmetadataの形は
     揃わない。ここでも既存3データセットのどれとも違う形になる)。
+
+    prefecture_beds.csv.meta.json・prefecture_basic.csv.meta.jsonの`source`は
+    R6/R7が並存するようになった(M9)ため`published_fy`付きのリストになっている。
+    本データセットはR7のみで構成されるため、`_r7_source()`でR7の要素だけを
+    取り出す(`source[0]`だけを見るとR6が先頭に来た場合に誤る可能性があるため
+    不可。tools/build_web_data.pyと同じ理由)。
     """
-    beds_source = _select(metas["prefecture_beds"]["source"], SOURCE_KEYS)
-    basic_source = _select(metas["prefecture_basic"]["source"], SOURCE_KEYS)
+    beds_source = _select(_r7_source(metas["prefecture_beds"], "prefecture_beds.csv.meta.json"), SOURCE_KEYS)
+    basic_source = _select(_r7_source(metas["prefecture_basic"], "prefecture_basic.csv.meta.json"), SOURCE_KEYS)
     if beds_source != basic_source:
         raise SystemExit(
             "prefecture_beds.csv.meta.json と prefecture_basic.csv.meta.json の source が"
@@ -683,8 +730,16 @@ def build_metadata(metas: dict, inputs: list) -> dict:
     # 書き足さない)。唯一の例外が DEMAND_AGGREGATION_ISSUE で、これは
     # 「表示用データセットを作る過程で下した判断」(build_web_data.py の
     # area_indicators_2024_actual_excluded と同じ位置づけ)。
+    #
+    # prefecture_beds/prefecture_basicはR6/R7が並存するようになった(M9)ため、
+    # R6行についての既知欠陥が混ざりうる。R7のみで構成される本データセットには
+    # 当てはまらないので `_filter_known_issues_for_r7()` で除外する
+    # (tools/build_web_data.pyと同じ理由。現時点では該当する既知欠陥は無いが、
+    # 将来登録されたときに画面へ誤誘導が漏れないようにする)。
     known_issues = []
-    for name in ("prefecture_beds", "prefecture_basic", "demand_forecast", "demand_population"):
+    for name in ("prefecture_beds", "prefecture_basic"):
+        known_issues.extend(_filter_known_issues_for_r7(metas[name].get("known_issues", [])))
+    for name in ("demand_forecast", "demand_population"):
         known_issues.extend(metas[name].get("known_issues", []))
     known_issues.append(DEMAND_AGGREGATION_ISSUE)
 
@@ -702,7 +757,8 @@ def build_metadata(metas: dict, inputs: list) -> dict:
                 "prefecture_beds.csv・prefecture_basic.csv・demand_forecast.csv・"
                 "demand_population.csv・area_beds.csv・area_basic.csv・"
                 "prefecture_boundaries_R7.geojsonを読み込み",
-                "全CSVの全行がpublished_fy=='R7'であることを確認(検証1)",
+                "prefecture_beds.csv・prefecture_basic.csv・area_beds.csv・area_basic.csvを"
+                "published_fy=='R7'の行だけに絞り込み(検証1)",
                 "(pref_code, bed_function, series, year)の重複がないことを確認(検証2)",
                 "pref_code集合が4者(prefecture_beds/prefecture_basic/境界GeoJSON/"
                 "area_basic)で整合し、全国を除いて47件であることを確認(検証3)",
@@ -759,7 +815,7 @@ def build_and_write(out_path: Path) -> Path:
         + f" prefecture_boundaries_R7.geojson={len(geo_pref)}都道府県"
     )
 
-    validate_published_fy(rows)
+    rows = filter_r7_rows(rows)
 
     actual_by_key, need_by_key, basic_by_code, area_count_by_pref = validate_and_index_beds(
         rows["prefecture_beds"], rows["prefecture_basic"], geo_pref, rows["area_basic"], rows["area_beds"]

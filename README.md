@@ -14,9 +14,10 @@
   - 在宅（訪問診療）・外来の医療需要推計（2024→2050年度、年度スライダー）
   - 医療機関別の病床数・診療実績・医師数
   - 患者の流入・流出（NDB 2024年度、構想区域間・3区分別。相手区域の内訳と地図での塗り分け）
+  - 公表年度間の比較（R6→R7）: 見込量比（2025年）・実績の1年変化（2024→2025）
 - **CSV ダウンロード**:
   - 表示条件で絞り込んだ CSV（4種、いずれも由来ヘッダー付き）: 地図に表示中の指標を全339区域ぶん／選択区域1つの基礎情報・病床・医療需要推計／選択区域の医療機関一覧×21指標／選択区域の患者の流入元・流出先の内訳
-  - 加工済みデータセットの一括ダウンロード: `data/processed/` の CSV 15本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv` を1本の ZIP にまとめて配布（出典メタデータ・SHA-256 同梱）
+  - 加工済みデータセットの一括ダウンロード: `data/processed/` の CSV 16本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv` を1本の ZIP にまとめて配布（出典メタデータ・SHA-256 同梱）
 
 詳細は [doc/REQUIREMENTS.md](doc/REQUIREMENTS.md) を参照。
 
@@ -92,3 +93,5 @@ npm run dev
 - [x] Excel パーサ: 医療機関別の病床数・診療実績等（`tools/parse_facility_beds.py` → `data/processed/facility_*.csv`）と国土数値情報 P04 との名寄せ（[doc/FACILITY_LINKAGE.md](doc/FACILITY_LINKAGE.md)）
 - [x] CSV ダウンロード（表示条件で絞り込んだ CSV 4種と、加工済みデータセットの一括 ZIP）
 - [x] Excel パーサ: 患者の流入率・流出率（`tools/parse_patient_flow.py` → `data/processed/patient_flow*.csv`）と、区域パネル・地図での可視化
+- [x] 都道府県階層（概観レイヤ）: `tools/build_prefecture_boundaries.py`・`tools/build_web_prefecture.py` と、表示単位トグル（都道府県／構想区域）
+- [x] R6公表分の①②を出力対象化し、R6→R7の年度間比較を検証・実装（`tools/verify_yoy_R6_R7.py` → [doc/YOY_VERIFICATION.md](doc/YOY_VERIFICATION.md)、`tools/build_web_yoy.py` → `data/processed/area_yoy_R6_R7.json`、画面に「公表年度間の比較（R6→R7）」として追加）

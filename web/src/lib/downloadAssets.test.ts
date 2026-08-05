@@ -7,8 +7,8 @@ describe('bulkDownloadUrl', () => {
     // Pages sub-path (vite.config.ts sets base: './') — assert the function
     // actually reads BASE_URL rather than hardcoding (same reasoning as
     // facilityShard.test.ts's facilityShardUrl test).
-    expect(bulkDownloadUrl('chiiki-iryo-koso_processed-csv_R7.zip')).toBe(
-      `${import.meta.env.BASE_URL}downloads/chiiki-iryo-koso_processed-csv_R7.zip`
+    expect(bulkDownloadUrl('chiiki-iryo-koso_processed-csv_R6_R7.zip')).toBe(
+      `${import.meta.env.BASE_URL}downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip`
     );
     expect(bulkDownloadUrl('area_boundaries_R7.geojson')).toBe(
       `${import.meta.env.BASE_URL}downloads/area_boundaries_R7.geojson`

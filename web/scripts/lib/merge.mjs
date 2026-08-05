@@ -31,6 +31,33 @@ export function demandRatioKey(category, year) {
   return `${category}_r_${year}`;
 }
 
+// ---- YoY (R6→R7 公表年度間比較) flat property keys -------------------------
+//
+// Kept as functions (not hardcoded strings) so web/src/lib/metrics.ts can
+// build/read the exact same keys — merge.test.ts checks the two
+// implementations agree (see M9 brief, same drift trap as
+// demandValueKey/demandRatioKey above — CLAUDE.md 罠10).
+
+/** 実績2025(R7) ÷ 見込量2025(R6) の比。 @param {string} fn @returns {string} */
+export function yoyPlanRatioKey(fn) {
+  return `y_pa_${fn}`;
+}
+
+/** 実績2025(R7) ÷ 実績2024(R6) の比。 @param {string} fn @returns {string} */
+export function yoyChangeRatioKey(fn) {
+  return `y_yy_${fn}`;
+}
+
+/** 見込量2025(R6)の生値。 @param {string} fn @returns {string} */
+export function yoyPlanValueKey(fn) {
+  return `y_plan_${fn}`;
+}
+
+/** 実績2024(R6)の生値。 @param {string} fn @returns {string} */
+export function yoyActual2024Key(fn) {
+  return `y_a24_${fn}`;
+}
+
 /**
  * Compute the [west, south, east, north] bounding box of a Polygon or
  * MultiPolygon geometry.
@@ -73,12 +100,13 @@ export function computeBBox(geometry) {
  * @param {{features: Array<{properties: Record<string, unknown>, geometry: unknown}>}} boundaries
  * @param {{areas: Array<Record<string, unknown>>}} indicators
  * @param {{categories: string[], years: number[], baseline_year: number, areas: Array<Record<string, unknown>>}} demand
+ * @param {{functions: string[], areas: Array<Record<string, unknown>>}} yoy
  * @returns {{
  *   type: 'FeatureCollection',
  *   features: Array<{type: 'Feature', properties: Record<string, string | number>, geometry: unknown}>
  * }}
  */
-export function buildAreaMap(boundaries, indicators, demand) {
+export function buildAreaMap(boundaries, indicators, demand, yoy) {
   const boundaryCodes = boundaries.features.map((f) => f.properties.area_code);
   const boundaryCodeSet = new Set(boundaryCodes);
   const indicatorCodeSet = new Set(indicators.areas.map((a) => a.area_code));
@@ -104,12 +132,25 @@ export function buildAreaMap(boundaries, indicators, demand) {
     );
   }
 
+  const yoyCodeSet = new Set(yoy.areas.map((a) => a.area_code));
+  const missingInYoy = [...boundaryCodeSet].filter((c) => !yoyCodeSet.has(c));
+  const missingInBoundariesFromYoy = [...yoyCodeSet].filter((c) => !boundaryCodeSet.has(c));
+  if (missingInYoy.length > 0 || missingInBoundariesFromYoy.length > 0) {
+    throw new Error(
+      'buildAreaMap: area_code sets differ between boundaries and yoy. ' +
+        `missing_in_yoy=${JSON.stringify(missingInYoy)} ` +
+        `missing_in_boundaries=${JSON.stringify(missingInBoundariesFromYoy)}`
+    );
+  }
+
   const indicatorByCode = new Map(indicators.areas.map((a) => [a.area_code, a]));
   const demandByCode = new Map(demand.areas.map((a) => [a.area_code, a]));
+  const yoyByCode = new Map(yoy.areas.map((a) => [a.area_code, a]));
 
   const features = boundaries.features.map((feature) => {
     const area = indicatorByCode.get(feature.properties.area_code);
     const demandArea = demandByCode.get(feature.properties.area_code);
+    const yoyArea = yoyByCode.get(feature.properties.area_code);
 
     /** @type {Record<string, string | number>} */
     const props = {
@@ -158,6 +199,23 @@ export function buildAreaMap(boundaries, indicators, demand) {
         }
         props[demandValueKey(category, year)] = value;
         props[demandRatioKey(category, year)] = value / baseline;
+      }
+    }
+
+    // YoY (R6→R7 公表年度間比較): raw plan_2025(R6)/actual_2024(R6) values are
+    // always emitted (never zero-denominator issues on their own), while the
+    // two ratio properties are omitted when their denominator is 0 — same
+    // "no key" convention as r_<fn> above (not 0, not Infinity; the reader
+    // must treat a missing key as 算出不可, not as 0).
+    for (const fn of yoy.functions) {
+      const beds = yoyArea.beds[fn];
+      props[yoyPlanValueKey(fn)] = beds.plan_2025;
+      props[yoyActual2024Key(fn)] = beds.actual_2024;
+      if (beds.plan_2025 !== 0) {
+        props[yoyPlanRatioKey(fn)] = beds.actual_2025 / beds.plan_2025;
+      }
+      if (beds.actual_2024 !== 0) {
+        props[yoyChangeRatioKey(fn)] = beds.actual_2025 / beds.actual_2024;
       }
     }
 

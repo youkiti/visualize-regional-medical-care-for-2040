@@ -15,6 +15,7 @@ import {
   RATIO_BIN_EDGES,
   RATIO_UNAVAILABLE_COLOR,
   RATIO_UNAVAILABLE_OUTLINE_COLOR,
+  YOY_RATIO_BIN_EDGES,
   computeSequentialClasses,
   demandCategoryOf,
   demandRatioKey,
@@ -23,10 +24,19 @@ import {
   formatMetricValue,
   formatPercent,
   formatReceipts,
+  formatYoyChangeRatio,
+  formatYoyRatio,
   isDemandMetric,
+  isYoyMetric,
   readDemandRatio,
   readDemandValue,
   readMetricValue,
+  readYoyRatio,
+  readYoyValue,
+  yoyActual2024Key,
+  yoyChangeRatioKey,
+  yoyPlanRatioKey,
+  yoyPlanValueKey,
 } from '../lib/metrics';
 import { buildFlowFillColor, buildFlowRateLookup, type FlowOverlay } from '../lib/flowMap';
 import { EMPTY_FACILITY_POINTS, type FacilityPointFeatureCollection, type FacilityPointProperties } from '../lib/facilityPoints';
@@ -188,6 +198,18 @@ function buildFillColorExpression(
     return ['case', ['!', ['has', key]], RATIO_UNAVAILABLE_COLOR, stepExpr];
   }
 
+  if (isYoyMetric(metric)) {
+    // 年度間比較(R6→R7)も病床の過不足率と同じ「固定境界＋算出不可はcaseで
+    // 分岐」の作り方にする。分位ではなく固定境界にする理由はDEMAND_RATIO_BIN_EDGES
+    // と同じ(2指標で色の意味を揃えるため。罠9)。
+    const key = metric === 'yoy_plan_vs_actual' ? yoyPlanRatioKey(bedFunction) : yoyChangeRatioKey(bedFunction);
+    const stepExpr: unknown[] = ['step', ['get', key], RATIO_BIN_COLORS[0]];
+    YOY_RATIO_BIN_EDGES.forEach((edge, i) => {
+      stepExpr.push(edge, RATIO_BIN_COLORS[i + 1]);
+    });
+    return ['case', ['!', ['has', key]], RATIO_UNAVAILABLE_COLOR, stepExpr];
+  }
+
   const key = metric === 'actual' ? `a_${bedFunction}` : `n_${bedFunction}`;
   const { edges, colors } = computeSequentialClasses(quantileEdges);
   const stepExpr: unknown[] = ['step', ['get', key], colors[0]];
@@ -214,6 +236,26 @@ function formatHoverTooltip(
     const valueText = value === null ? '—' : formatReceipts(value);
     const ratioText = ratio === null ? '' : `（2024年度比 ${formatChangeRatio(ratio)}）`;
     return `${demandCategoryLabels[category]} ${demandYearLabel}: ${valueText}${ratioText}`;
+  }
+  if (isYoyMetric(metric)) {
+    // 比(1.03倍等)と変化率(+3.0%)の両方に加え、分子・分母の実数とそれぞれの
+    // 公表回(R6/R7)を示す(brief記載どおり)。実績2025はa_<fn>(area_indicators
+    // 由来、area_yoy.jsonのactual_2025と同じ値)を流用し、見込量2025(R6)/
+    // 実績2024(R6)はy_plan_<fn>/y_a24_<fn>から読む。
+    const ratio = readYoyRatio(props, metric, bedFunction);
+    const numerator = readYoyValue(props, `a_${bedFunction}`);
+    const denominatorKey = metric === 'yoy_plan_vs_actual' ? yoyPlanValueKey(bedFunction) : yoyActual2024Key(bedFunction);
+    const denominatorLabel = metric === 'yoy_plan_vs_actual' ? '見込量2025(R6)' : '実績2024(R6)';
+    const denominator = readYoyValue(props, denominatorKey);
+    const detailText =
+      numerator !== null && denominator !== null
+        ? `／実績2025(R7) ${formatInteger(numerator)}床 ÷ ${denominatorLabel} ${formatInteger(denominator)}床`
+        : '';
+    const valueText =
+      ratio === null
+        ? formatYoyRatio(ratio, metric)
+        : `${formatYoyRatio(ratio, metric)}（${formatYoyChangeRatio(ratio, metric)}）`;
+    return `${functionLabel}: ${valueText}${detailText}`;
   }
   return `${functionLabel}: ${formatMetricValue(metric, readMetricValue(props, metric, bedFunction))}`;
 }
@@ -630,7 +672,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         ? buildFlowFillColor(flowOverlay.entries, flowOverlay.selfCode, flowOverlay.selfRate)
         : buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
     );
-    map.setFilter(unavailableLayer, ['!', ['has', `r_${bedFunction}`]]);
+    // 「算出不可」の破線レイヤは 'ratio'(need=0) と yoy指標(見込量2025/実績2024が0)
+    // のときだけ意味を持つ。実績/必要数の実数指標でも、需要指標（基準年が全区域で
+    // 0でないことをPython側で検証済み — 算出不可の区域はそもそも存在しない）でも
+    // 非表示にする。yoy指標のキーは構想区域層にしか無いが、フィルタ自体は
+    // 表示中の層(unavailableLayer)にだけ適用するので都道府県層には影響しない。
+    const unavailableKey = isYoyMetric(metric)
+      ? metric === 'yoy_plan_vs_actual'
+        ? yoyPlanRatioKey(bedFunction)
+        : yoyChangeRatioKey(bedFunction)
+      : `r_${bedFunction}`;
+    map.setFilter(unavailableLayer, ['!', ['has', unavailableKey]]);
 
     // 排他表示。level==='area' のときだけ県境(LAYER_PREF_BORDER)を区域の塗りの
     // 上に重ねる。level==='pref' では県境は塗りの白縁(LAYER_PREF_OUTLINE)が
@@ -645,12 +697,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
     map.setLayoutProperty(LAYER_PREF_BORDER, 'visibility', isPref ? 'none' : 'visible');
 
-    // 「算出不可」の破線レイヤは 'ratio' 選択時のみ意味を持つ（need=0で比が算出不可の
-    // 区域を示す）。実績/必要数の実数指標でも、需要指標（基準年が全区域で0でないこと
-    // をPython側で検証済み — 算出不可の区域はそもそも存在しない）でも非表示にする。
-    // 表示していない層の破線は常に非表示にする。流入出オーバーレイ中は塗りが
-    // 指標と無関係になるため、こちらも隠す。
-    const showUnavailable = metric === 'ratio' && !useFlowFill;
+    // 「算出不可」の破線レイヤは 'ratio' と yoy指標の選択時のみ意味を持つ（need=0や
+    // 見込量2025/実績2024が0で比が算出不可の区域を示す）。実績/必要数の実数指標でも、
+    // 需要指標（基準年が全区域で0でないことをPython側で検証済み — 算出不可の区域は
+    // そもそも存在しない）でも非表示にする。表示していない層の破線は常に非表示にする。
+    // 流入出オーバーレイ中は塗りが指標と無関係になるため、こちらも隠す。
+    const showUnavailable = (metric === 'ratio' || isYoyMetric(metric)) && !useFlowFill;
     map.setLayoutProperty(
       LAYER_UNAVAILABLE_OUTLINE,
       'visibility',

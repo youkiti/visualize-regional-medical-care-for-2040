@@ -193,9 +193,14 @@ def test_pref_codes_match_boundaries_geojson(prefectures):
 
 def test_beds_are_the_published_prefecture_values(prefectures_by_code):
     """病床は「都道府県別の公表値そのもの」であること(構想区域の合計を書いて
-    いるのではない)。prefecture_beds.csvの2025年行と1件ずつ突き合わせる。"""
+    いるのではない)。prefecture_beds.csvの2025年行と1件ずつ突き合わせる。
+
+    prefecture_beds.csvはR6/R7がpublished_fyで並存する(M9)ため、出力データセット
+    (R7のみで構成)と突き合わせるにはR7行だけに絞り込む必要がある。絞り込まないと
+    R6の該当行が二重にカウントされる。
+    """
     with open(PREFECTURE_BEDS_CSV, "r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+        rows = [r for r in csv.DictReader(f) if r["published_fy"] == "R7"]
     checked = 0
     for row in rows:
         if row["year"] != "2025" or row["pref_code"] == NATIONAL_CODE:
@@ -216,11 +221,17 @@ def test_beds_match_area_sum_for_every_prefecture(prefectures_by_code):
     """**このファイルの中心**: 都道府県の2025年病床数が、構想区域(area_beds.csv)を
     都道府県で合計した値と完全に一致すること。厚生労働省の別々の公表ファイル
     (001722915.xlsx と 001723349.xlsx)どうしの内部整合の確認でもあり、
-    概観層と主表示層で数字が食い違わないことの担保でもある。"""
+    概観層と主表示層で数字が食い違わないことの担保でもある。
+
+    area_basic.csv・area_beds.csvはR6/R7がpublished_fyで並存する(M9)ため、R7行
+    だけに絞り込む。area_beds.csvを絞り込まないとR6分が二重に合算されてしまう。
+    """
     with open(AREA_BASIC_CSV, "r", encoding="utf-8", newline="") as f:
-        pref_by_area = {r["area_code"]: r["pref_code"] for r in csv.DictReader(f)}
+        pref_by_area = {
+            r["area_code"]: r["pref_code"] for r in csv.DictReader(f) if r["published_fy"] == "R7"
+        }
     with open(AREA_BEDS_CSV, "r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+        rows = [r for r in csv.DictReader(f) if r["published_fy"] == "R7"]
 
     sums = defaultdict(int)
     for row in rows:
@@ -243,9 +254,15 @@ def test_national_beds_equal_sum_of_prefectures(data, prefectures):
 
 
 def test_demand_is_the_sum_of_the_areas(prefectures_by_code):
-    """需要は構想区域の合計であること(厚労省は都道府県単位を公表していない)。"""
+    """需要は構想区域の合計であること(厚労省は都道府県単位を公表していない)。
+
+    area_basic.csvはR6/R7がpublished_fyで並存する(M9)ため、R7行だけに絞り込む
+    (pref_codeの値自体はR6/R7で同一だが、他のテストと同じ規律に揃える)。
+    """
     with open(AREA_BASIC_CSV, "r", encoding="utf-8", newline="") as f:
-        pref_by_area = {r["area_code"]: r["pref_code"] for r in csv.DictReader(f)}
+        pref_by_area = {
+            r["area_code"]: r["pref_code"] for r in csv.DictReader(f) if r["published_fy"] == "R7"
+        }
     with open(DEMAND_FORECAST_CSV, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
 

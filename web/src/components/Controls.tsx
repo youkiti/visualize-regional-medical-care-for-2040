@@ -7,6 +7,7 @@ import type {
   DemandMetricKind,
   MapLevel,
   MetricKind,
+  YoyMetricKind,
 } from '../types';
 
 interface ControlsProps {
@@ -41,6 +42,11 @@ const BED_METRIC_OPTIONS: Array<{ value: BedMetricKind; label: string }> = [
 const DEMAND_METRIC_OPTIONS: Array<{ value: DemandMetricKind; label: string }> = [
   { value: 'demand_home_care', label: '在宅（訪問診療）' },
   { value: 'demand_outpatient', label: '外来' },
+];
+
+const YOY_METRIC_OPTIONS: Array<{ value: YoyMetricKind; label: string }> = [
+  { value: 'yoy_plan_vs_actual', label: '見込量比（2025年）' },
+  { value: 'yoy_actual_change', label: '実績の1年変化（2024→2025）' },
 ];
 
 const LEVEL_OPTIONS: Array<{ value: MapLevel; label: string; title: string }> = [
@@ -122,6 +128,13 @@ export default function Controls({
           </optgroup>
           <optgroup label="医療需要（2024年度比）">
             {DEMAND_METRIC_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="公表年度間の比較（R6→R7）">
+            {YOY_METRIC_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

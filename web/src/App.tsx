@@ -7,7 +7,7 @@ import AreaPanel from './components/AreaPanel';
 import PrefecturePanel from './components/PrefecturePanel';
 import BulkDownload from './components/BulkDownload';
 import SourceNotes from './components/SourceNotes';
-import { computeQuantileEdges, isDemandMetric } from './lib/metrics';
+import { computeQuantileEdges, isDemandMetric, isYoyMetric } from './lib/metrics';
 import { useFacilityShard } from './lib/facilityShard';
 import { useFlowData } from './lib/flowData';
 import type { FlowOverlay } from './lib/flowMap';
@@ -18,6 +18,7 @@ import mapDataUrl from './generated/area_map.json?url';
 import prefMapDataUrl from './generated/pref_map.json?url';
 import indicatorsJson from './generated/area_indicators.json';
 import demandJson from './generated/area_demand.json';
+import yoyJson from './generated/area_yoy.json';
 import areaIndexJson from './generated/area_index.json';
 import prefectureIndicatorsJson from './generated/prefecture_indicators.json';
 import facilitySummaryJson from './generated/facility_summary.json';
@@ -26,6 +27,7 @@ import type {
   AreaDemandData,
   AreaIndexEntry,
   AreaIndicatorsData,
+  AreaYoyData,
   BedFunctionKey,
   DownloadManifest,
   FacilitySummaryData,
@@ -45,6 +47,12 @@ const indicators = indicatorsJson as unknown as AreaIndicatorsData;
 // data/processed/area_demand_R7.json (same treatment as area_indicators.json
 // above) — its shape is documented by AreaDemandData in types.ts.
 const demand = demandJson as unknown as AreaDemandData;
+
+// generated/area_yoy.json is a verbatim copy of
+// data/processed/area_yoy_R6_R7.json (same treatment as area_indicators.json
+// above; small enough — ~290KB — to bundle without sharding) — its shape is
+// documented by AreaYoyData in types.ts.
+const yoy = yoyJson as unknown as AreaYoyData;
 
 // generated/area_index.json is the lightweight (bundled, not fetched)
 // bbox/boundary_source lookup — see scripts/lib/merge.mjs buildAreaIndex()
@@ -149,12 +157,13 @@ export default function App() {
   // area_indicators.json (bundled, no need to parse area_map.json at
   // runtime) — the a_*/n_* values in area_map.json are the same numbers.
   // Demand metrics use their own fixed (non-quantile) bins (see
-  // DEMAND_RATIO_BIN_EDGES in lib/metrics.ts), so they don't need this at all.
+  // DEMAND_RATIO_BIN_EDGES in lib/metrics.ts), and YoY metrics likewise use
+  // fixed bins (YOY_RATIO_BIN_EDGES), so none of them need this at all.
   // 分位は表示単位ごとに別物にする（47都道府県の分位を339区域へ、あるいはその逆を
   // 当てると、凡例の区分と地図の色が実データの分布から外れる）。固定境界の
-  // 'ratio'・需要指標には影響しない。
+  // 'ratio'・需要指標・YoY指標には影響しない。
   const quantileEdges = useMemo(() => {
-    if (metric === 'ratio' || isDemandMetric(metric)) return [];
+    if (metric === 'ratio' || isDemandMetric(metric) || isYoyMetric(metric)) return [];
     const key = metric === 'actual' ? 'actual_2025' : 'need_2025';
     const values =
       level === 'pref'
@@ -171,6 +180,11 @@ export default function App() {
   const selectedDemandArea = useMemo(() => {
     if (!selectedAreaCode) return null;
     return demand.areas.find((area) => area.area_code === selectedAreaCode) ?? null;
+  }, [selectedAreaCode]);
+
+  const selectedYoyArea = useMemo(() => {
+    if (!selectedAreaCode) return null;
+    return yoy.areas.find((area) => area.area_code === selectedAreaCode) ?? null;
   }, [selectedAreaCode]);
 
   const selectedIndexEntry = useMemo(() => {
@@ -321,7 +335,7 @@ export default function App() {
 
   // 今の指標・病床機能・年度のまま、全339区域ぶんをCSVにする(Controls「表示中のデータをCSV」)。
   const handleDownloadAreaTable = useCallback(() => {
-    const { filename, text } = buildAreaTableCsv({ indicators, demand, metric, bedFunction, year: selectedYear });
+    const { filename, text } = buildAreaTableCsv({ indicators, demand, yoy, metric, bedFunction, year: selectedYear });
     triggerDownload(filename, text);
   }, [metric, bedFunction, selectedYear]);
 
@@ -331,8 +345,10 @@ export default function App() {
     const { filename, text } = buildAreaDetailCsv({
       area: selectedArea,
       demandArea: selectedDemandArea,
+      yoyArea: selectedYoyArea,
       indicatorsMetadata: indicators.metadata,
       demandMetadata: demand.metadata,
+      yoyMetadata: yoy.metadata,
       functions: indicators.functions,
       functionLabels: indicators.function_labels,
       demandCategories: demand.categories,
@@ -342,7 +358,7 @@ export default function App() {
       baselineYear: demand.baseline_year,
     });
     triggerDownload(filename, text);
-  }, [selectedArea, selectedDemandArea]);
+  }, [selectedArea, selectedDemandArea, selectedYoyArea]);
 
   // 選択中の区域の医療機関一覧をCSVにする(FacilityList「一覧をCSV」)。
   const handleDownloadFacilities = useCallback(() => {
@@ -458,6 +474,7 @@ export default function App() {
               functions={indicators.functions}
               functionLabels={indicators.function_labels}
               demandArea={selectedDemandArea}
+              yoyArea={selectedYoyArea}
               demandCategories={demand.categories}
               demandCategoryLabels={demand.category_labels}
               demandYears={demand.years}
@@ -497,6 +514,7 @@ export default function App() {
             metadata={indicators.metadata}
             demandMetadata={demand.metadata}
             facilityMetadata={facilitySummary.metadata}
+            yoyMetadata={yoy.metadata}
             flowMetadata={flowData?.metadata ?? null}
             prefectureMetadata={prefectureIndicators.metadata}
           />

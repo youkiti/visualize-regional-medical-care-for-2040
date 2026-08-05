@@ -180,6 +180,10 @@ def load_area_basic(path: Path = AREA_BASIC_CSV) -> dict:
     """
     with open(path, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
+    # area_basic.csv はR6/R7が published_fy で並存するようになった(M9)。
+    # このスクリプトはR7の339構想区域境界を合成するものなので、対象とする
+    # R7行のみを読む(R6行を含めるとarea_codeが重複してしまう)。
+    rows = [r for r in rows if r["published_fy"] == "R7"]
     area_by_code = {}
     for row in rows:
         code = normalize_area_code(row["area_code"])

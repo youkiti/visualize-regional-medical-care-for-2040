@@ -26,7 +26,7 @@
   },
   "processing": {
     "script": "tools/verify_area_join.py",
-    "date": "2026-08-04",
+    "date": "2026-08-05",
     "steps": [
       "area_basic.csv の area_code と iryoken2_A38-20.geojson の A38b_003 を tools.lib.codes.normalize_area_code で正規化し、完全外部結合",
       "一致(matched)/構想区域側のみ(area_only)/境界側のみ(geo_only)に分類し、join_status→コード昇順で決定的に並べる",

@@ -151,16 +151,35 @@ def _read_json(path: Path) -> dict:
         return json.load(f)
 
 
+def _r7_source(meta: dict, label: str) -> dict:
+    """`<csv>.meta.json` の `source` から published_fy=='R7' の要素を返す。
+
+    `area_basic.csv`・`area_beds.csv`・`prefecture_beds.csv` はR6/R7が
+    published_fy で並存するようになった(M9)ため、`source` が単一のdictでは
+    なくリストになっている。このスクリプトはR7限定の検証・レポートなので、
+    R7の出典情報だけを取り出す。
+    """
+    source = meta["source"]
+    for entry in source:
+        if entry.get("published_fy") == "R7":
+            return entry
+    raise ValueError(f"{label}: sourceにpublished_fy=='R7'の要素が見つかりません")
+
+
 def load_area_basic():
     """`area_basic.csv` を読み、正規化済み構想区域コードをキーにした辞書を返す。
 
     戻り値: (area_by_code, rows, meta)
       area_by_code: {area_code(正規化済み): 行dict}
-      rows: 全行(dictのリスト、CSV原文順)
+      rows: R7行のみ(dictのリスト、CSV原文順)
       meta: `area_basic.csv.meta.json` の内容
     """
     with open(AREA_BASIC_CSV, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
+    # area_basic.csv はR6/R7が published_fy で並存するようになった(M9)。
+    # このスクリプトはR7の構想区域とA38二次医療圏の突合を検証するものなので、
+    # 対象とするR7行のみを読む(R6行を含めるとarea_codeが重複してしまう)。
+    rows = [r for r in rows if r["published_fy"] == "R7"]
     area_by_code = {}
     for row in rows:
         code = normalize_area_code(row["area_code"])
@@ -214,9 +233,15 @@ def load_area_boundaries_metadata(path: Path = AREA_BOUNDARIES_GEOJSON) -> dict:
 
 
 def load_beds_csv(path: Path):
-    """病床数CSV(`area_beds.csv` / `prefecture_beds.csv`)を読み、dictのリストで返す。"""
+    """病床数CSV(`area_beds.csv` / `prefecture_beds.csv`)を読み、dictのリストで返す。
+
+    両CSVともR6/R7が published_fy で並存するようになった(M9)。このスクリプトは
+    R7の構想区域と都道府県の集計整合のみを検証するものなので、対象とするR7行の
+    みを返す(R6行が混ざると集計値もキー数も変わってしまう)。
+    """
     with open(path, "r", encoding="utf-8", newline="") as f:
-        return list(csv.DictReader(f))
+        rows = list(csv.DictReader(f))
+    return [r for r in rows if r["published_fy"] == "R7"]
 
 
 def compute_join(area_by_code: dict, geo_by_code: dict):
@@ -436,6 +461,13 @@ def build_report_markdown(
     (`load_area_boundaries_metadata()` が返す値。フィーチャ数・三重県の
     新旧面積整合等の検証済み実測値を持つ)。
     """
+    # area_basic.csv・area_beds.csv・prefecture_beds.csv はR6/R7が並存するように
+    # なった(M9)ため source がリストになっている。このレポートはR7限定の検証
+    # なので、R7の出典情報だけを取り出す。
+    area_source = _r7_source(area_meta, "area_basic.csv")
+    area_beds_source = _r7_source(area_beds_meta, "area_beds.csv")
+    pref_beds_source = _r7_source(pref_beds_meta, "prefecture_beds.csv")
+
     lines = []
     a = lines.append
 
@@ -474,18 +506,18 @@ def build_report_markdown(
     a("|---|---|---|---|")
     a(
         f"| `area_basic.csv` | {len(area_rows)}行 | "
-        f"{area_meta['source']['source_file']}("
-        f"{area_meta['source']['fiscal_year']}) | `{area_meta['source']['source_sha256']}` |"
+        f"{area_source['source_file']}("
+        f"{area_source['fiscal_year']}) | `{area_source['source_sha256']}` |"
     )
     a(
         f"| `area_beds.csv` | {len(area_beds_rows)}行 | "
-        f"{area_beds_meta['source']['source_file']}("
-        f"{area_beds_meta['source']['fiscal_year']}) | `{area_beds_meta['source']['source_sha256']}` |"
+        f"{area_beds_source['source_file']}("
+        f"{area_beds_source['fiscal_year']}) | `{area_beds_source['source_sha256']}` |"
     )
     a(
         f"| `prefecture_beds.csv` | {len(pref_beds_rows)}行 | "
-        f"{pref_beds_meta['source']['source_file']}("
-        f"{pref_beds_meta['source']['fiscal_year']}) | `{pref_beds_meta['source']['source_sha256']}` |"
+        f"{pref_beds_source['source_file']}("
+        f"{pref_beds_source['fiscal_year']}) | `{pref_beds_source['source_sha256']}` |"
     )
     a(
         f"| `iryoken2_A38-20.geojson` | {geo_metadata['feature_count']}フィーチャ | "
@@ -886,14 +918,18 @@ def build_and_write(out_dir: Path, doc_dir: Path) -> dict:
     join_tuples = [tuple(row[h] if row[h] != "" else None for h in join_header) for row in join_rows]
 
     today = datetime.date.today().isoformat()
+    # area_basic.csv は source がリストになった(M9)ため、R7の出典情報だけを取り出す
+    # (area_geo_join.csv自体はR7限定のデータセットであり、この出力形は従来どおり
+    # 単一のdictを保つ)。
+    area_source_r7 = _r7_source(area_meta, "area_basic.csv")
     source = {
         "name": "構想区域(area_basic.csv) × 二次医療圏境界(iryoken2_A38-20.geojson) の完全外部結合",
         "inputs": [
             {
                 "file": "data/processed/area_basic.csv",
                 "row_count": len(area_rows),
-                "source_file": area_meta["source"]["source_file"],
-                "source_sha256": area_meta["source"]["source_sha256"],
+                "source_file": area_source_r7["source_file"],
+                "source_sha256": area_source_r7["source_sha256"],
             },
             {
                 "file": "data/processed/iryoken2_A38-20.geojson",

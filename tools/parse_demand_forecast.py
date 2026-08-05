@@ -413,11 +413,20 @@ def load_workbook():
 def _load_area_basic_reference():
     """`data/processed/area_basic.csv` から area_code -> (pref_name, area_name)
     の参照テーブルを読み込む(構想区域の対応が崩れていないことの検証用)。
+
+    001728462.xlsx（医療需要推計）はR7のみで公表されているファイル(R6版なし)
+    なので、参照先も published_fy=='R7' の行に絞り込む。area_basic.csvはR6/R7が
+    published_fyで並存するようになった(M9)ため678行あり、絞り込まずに読むと
+    同じarea_codeがR7行・R6行の順で2回出現し、辞書代入で後勝ち(=R6の値)に
+    なってしまう(値そのものはR6/R7で同じはずだが、この帳票の突合が本来意図
+    しないR6行に依存する状態は避ける)。
     """
     path = REPO_ROOT / "data" / "processed" / "area_basic.csv"
     reference = {}
     with open(path, encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
+            if row["published_fy"] != "R7":
+                continue
             reference[row["area_code"]] = (row["pref_name"], row["area_name"])
     return reference
 

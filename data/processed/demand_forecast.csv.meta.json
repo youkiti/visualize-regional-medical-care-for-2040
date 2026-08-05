@@ -26,7 +26,7 @@
   },
   "processing": {
     "script": "tools/parse_demand_forecast.py",
-    "date": "2026-08-04",
+    "date": "2026-08-05",
     "steps": [
       "verify_source()でR7/001728462.xlsxのSHA-256をSHA256SUMSと照合",
       "openpyxl(data_only=True)でシートがちょうど2枚(将来の在宅（訪問診療）需要推計/将来の外来需要推計)であること、シート名を検証",

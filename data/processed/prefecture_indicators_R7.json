@@ -69,11 +69,11 @@
       "inputs": [
         {
           "path": "data/processed/prefecture_beds.csv",
-          "sha256": "8d49ef984d067ae4649bc4235a04548e93f40fce3a0f814695d8ef6554cbc130"
+          "sha256": "6251f94ea7dd6828d2f1db003afecd6b8b0f13042d2d3d07fa69e5883b260365"
         },
         {
           "path": "data/processed/prefecture_basic.csv",
-          "sha256": "54a7007da4bb0e09c4c637cd556094b7138313f0f2201aef35810e1fb3b2526e"
+          "sha256": "d9fc24a9244dce55a543c32cd9b88db21cae576a57419bc49467437bc777298a"
         },
         {
           "path": "data/processed/demand_forecast.csv",
@@ -85,20 +85,20 @@
         },
         {
           "path": "data/processed/area_beds.csv",
-          "sha256": "f96617f0418a49669e972cf5c45c72f25d00206da9ca259c09a8d1e2d82c3f52"
+          "sha256": "deacd48a16556c1ac09121813ec2dd628e01afab51a26415283111a344996f48"
         },
         {
           "path": "data/processed/area_basic.csv",
-          "sha256": "7ce2cfc7807288abd23d20f47008368b2aa8e5e6317a1a0d61a2b3adeba24323"
+          "sha256": "bd88040df87384f5fd4843115f70266973847641774a9613f4625dc76c128669"
         },
         {
           "path": "data/processed/prefecture_boundaries_R7.geojson",
-          "sha256": "e91071d5789c7930c2b50d9fd14260b5608fc704fa3c8f1ea80dc0eb54287130"
+          "sha256": "0ea8bb69414bfe2d3b945adc696d8205bce486e887f5e1b6cc31d50cf7f44779"
         }
       ],
       "steps": [
         "prefecture_beds.csv・prefecture_basic.csv・demand_forecast.csv・demand_population.csv・area_beds.csv・area_basic.csv・prefecture_boundaries_R7.geojsonを読み込み",
-        "全CSVの全行がpublished_fy=='R7'であることを確認(検証1)",
+        "prefecture_beds.csv・prefecture_basic.csv・area_beds.csv・area_basic.csvをpublished_fy=='R7'の行だけに絞り込み(検証1)",
         "(pref_code, bed_function, series, year)の重複がないことを確認(検証2)",
         "pref_code集合が4者(prefecture_beds/prefecture_basic/境界GeoJSON/area_basic)で整合し、全国を除いて47件であることを確認(検証3)",
         "各pref_code(48、全国含む)×5機能について実績2025・必要数2025がちょうど1行ずつ存在することを確認(検証4)",

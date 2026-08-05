@@ -19,6 +19,8 @@ from tools.parse_area_beds import (
     BED_FUNCTIONS,
     BLOCK_SIZE,
     BLOCK_TOP0,
+    EXPECTED_MISSING_BEDS,
+    KNOWN_ISSUES,
     LayoutMismatchError,
     NUM_BLOCKS,
     build_and_write,
@@ -43,6 +45,21 @@ def r7_beds_lookup(r7):
     return {
         (row["area_code"], row["bed_function"], row["series"], row["year"]): row["beds"]
         for row in r7["result"].beds_rows
+    }
+
+
+@pytest.fixture(scope="module")
+def r6():
+    ws, cfg, source_sha256 = load_sheet("R6")
+    result = parse_sheet(ws, published_fy="R6")
+    return {"ws": ws, "cfg": cfg, "source_sha256": source_sha256, "result": result}
+
+
+@pytest.fixture(scope="module")
+def r6_beds_lookup(r6):
+    return {
+        (row["area_code"], row["bed_function"], row["series"], row["year"]): row["beds"]
+        for row in r6["result"].beds_rows
     }
 
 
@@ -83,6 +100,13 @@ def test_row_counts(r7):
     result = r7["result"]
     assert len(result.beds_rows) == 18645  # 339区域 × 5機能 × 11系列
     assert len(result.report_rate_rows) == 3051  # 339区域 × 9実績年
+    assert len(result.basic_rows) == 339
+
+
+def test_row_counts_r6(r6):
+    result = r6["result"]
+    assert len(result.beds_rows) == 16950  # 339区域 × 5機能 × 10系列(実績8+見込量1+必要数1)
+    assert len(result.report_rate_rows) == 2712  # 339区域 × 8実績年
     assert len(result.basic_rows) == 339
 
 
@@ -192,6 +216,80 @@ def test_basic_info_spotcheck(r7):
     assert minamiwatashima["area_2020_km2"] == 2670.6
     assert minamiwatashima["outflow_rate"] == 0.035
     assert minamiwatashima["inflow_rate"] == 0.085
+    # R7行はnet_flow_rate関連2列を常に持たない(空)
+    assert minamiwatashima["net_flow_rate"] is None
+    assert minamiwatashima["net_flow_rate_source_value"] is None
+
+
+# --- R6: 流出入(net_flow_rate)・実績セル欠測(南檜山) -----------------------
+
+
+def test_r6_basic_info_spotcheck(r6):
+    rows = {row["area_code"]: row for row in r6["result"].basic_rows}
+    minamihiyama = rows["0102"]
+    # R6行はoutflow_rate/inflow_rate関連4列を常に持たない(空)
+    assert minamihiyama["outflow_rate"] is None
+    assert minamihiyama["outflow_rate_source_value"] is None
+    assert minamihiyama["inflow_rate"] is None
+    assert minamihiyama["inflow_rate_source_value"] is None
+    assert math.isclose(minamihiyama["net_flow_rate"], -0.572, rel_tol=1e-9)
+    assert math.isclose(minamihiyama["net_flow_rate_source_value"], -0.572, rel_tol=1e-9)
+
+
+def test_r6_net_flow_rate_can_be_negative(r6):
+    """R6の一般病床患者流出入はR7の推計流出/流入患者割合(0〜1)と異なり
+    負値を取りうる(実測 -0.893〜0.434)。value_range=(-1, 1)が機能して
+    いることの確認。
+    """
+    values = [
+        row["net_flow_rate"]
+        for row in r6["result"].basic_rows
+        if row["net_flow_rate"] is not None
+    ]
+    assert values, "R6のnet_flow_rateが1件も無い(想定外)"
+    assert any(v < 0 for v in values)
+    assert min(values) >= -1
+    assert max(values) <= 1
+
+
+def test_r6_missing_bed_cell_is_blank_and_other_functions_intact(r6_beds_lookup):
+    """南檜山(0102)の高度急性期・2015実績は原典で空欄(EXPECTED_MISSING_BEDS参照)。
+    beds は None(CSV上は空欄)のまま出力し、合計から逆算して埋めない。
+    同ブロックの他4値(合計・急性期・回復期・慢性期)は原典どおりの整数。
+    """
+    assert r6_beds_lookup[("0102", "高度急性期", "実績", 2015)] is None
+    assert r6_beds_lookup[("0102", "合計", "実績", 2015)] == 399
+    assert r6_beds_lookup[("0102", "急性期", "実績", 2015)] == 202
+    assert r6_beds_lookup[("0102", "回復期", "実績", 2015)] == 0
+    assert r6_beds_lookup[("0102", "慢性期", "実績", 2015)] == 197
+
+
+def test_r6_missing_bed_cell_matches_expected_missing_beds_exactly():
+    assert EXPECTED_MISSING_BEDS == {("R6", "0102", "高度急性期", "実績", 2015)}
+
+
+def test_unknown_missing_bed_cell_is_detected():
+    """EXPECTED_MISSING_BEDSに無い空セルが見つかった場合に検知できるか。
+
+    R7の任意のセル(区域コード0101・合計・2015実績)をメモリ上でNoneに
+    書き換える。`wb.save()` は呼ばない(R7/ 配下は編集禁止のため)。
+    """
+    ws, _, _ = load_sheet("R7")
+    header = read_header_row(ws, BLOCK_TOP0 + 8, 2, ws.max_column - 1)
+    col_map = resolve_columns(header, col_start=2, classify=classify_bed_column)
+    col_2015 = next(c for c, (series, year) in col_map.items() if series == "実績" and year == 2015)
+
+    block = 0  # 区域コード0101
+    row = BLOCK_TOP0 + BLOCK_SIZE * block + 9  # 「合計」行(BED_FUNCTIONSの先頭)
+    original = ws.cell(row=row, column=col_2015).value
+    assert original is not None
+
+    ws.cell(row=row, column=col_2015).value = None
+
+    with pytest.raises(LayoutMismatchError):
+        parse_sheet(ws, published_fy="R7")
+
+    assert verify_source("R7/001723349.xlsx") == recorded_hash("R7/001723349.xlsx")
 
 
 # --- 既知の品質問題1: 2024実績が2025実績と全区域・全機能で同一 -------------
@@ -235,14 +333,93 @@ def test_known_issue_mie_outflow_inflow_rate_is_xxx(r7):
         assert row["inflow_rate_source_value"] == row["inflow_rate"]
 
 
+def test_known_issue_mie_net_flow_rate_is_xxx_in_r6_too(r6):
+    """R6でも同じ三重県8区域でnet_flow_rateが'XXX'になっている
+    (area_basic_outflow_inflow_rate_xxx_mieが両年度に当てはまることの根拠)。
+    """
+    rows = {row["area_code"]: row for row in r6["result"].basic_rows}
+
+    for area_code in MIE_XXX_AREA_CODES:
+        row = rows[area_code]
+        assert row["pref_name"] == "三重県", row
+        assert row["net_flow_rate"] is None
+        assert row["net_flow_rate_source_value"] == "XXX"
+
+    other_area_codes = set(rows) - MIE_XXX_AREA_CODES
+    for area_code in other_area_codes:
+        row = rows[area_code]
+        assert isinstance(row["net_flow_rate"], (int, float))
+        assert -1 <= row["net_flow_rate"] <= 1
+
+
+# --- 既知の品質問題3: 2024実績のR6/R7差異(area_beds_2024_actual_duplicated_as_2025の追加根拠) ---
+
+
+def test_known_issue_r6_2024_actual_mostly_differs_from_r7(r7_beds_lookup, r6_beds_lookup, r7):
+    """R7の「2024実績」列は「2025実績」列の複製(既知の問題)だが、R6の
+    2024実績はR7のそれとほとんど一致しない(=R6は複製ではなく健全な値)
+    ことを数値で確認する。KNOWN_ISSUE_BEDS_2024_DUPのevidenceの根拠。
+    """
+    area_codes = {row["area_code"] for row in r7["result"].basic_rows}
+    total = 0
+    mismatched = 0
+    for area_code in area_codes:
+        for bed_function in BED_FUNCTIONS:
+            r7_2024 = r7_beds_lookup[(area_code, bed_function, "実績", 2024)]
+            r6_2024 = r6_beds_lookup[(area_code, bed_function, "実績", 2024)]
+            total += 1
+            if r6_2024 != r7_2024:
+                mismatched += 1
+    assert total == 339 * len(BED_FUNCTIONS)
+    assert mismatched == 1281
+
+
+# --- 既知の品質問題4: 病床機能報告の報告率(2024年)がR6/R7で一部異なる ---------
+
+
+def test_known_issue_report_rate_2024_differs_between_r6_r7(r7, r6):
+    r7_rr = {(row["area_code"], row["year"]): row["report_rate"] for row in r7["result"].report_rate_rows}
+    r6_rr = {(row["area_code"], row["year"]): row["report_rate"] for row in r6["result"].report_rate_rows}
+
+    area_codes_2024 = {area_code for area_code, year in r7_rr if year == 2024}
+    assert len(area_codes_2024) == 339
+    mismatched_2024 = [
+        area_code
+        for area_code in area_codes_2024
+        if r6_rr.get((area_code, 2024)) != r7_rr.get((area_code, 2024))
+    ]
+    assert len(mismatched_2024) == 105
+
+    for year in (2015, 2018, 2019, 2020, 2021, 2022, 2023):
+        area_codes_year = {ac for ac, y in r7_rr if y == year}
+        mismatched = [
+            area_code
+            for area_code in area_codes_year
+            if r6_rr.get((area_code, year)) != r7_rr.get((area_code, year))
+        ]
+        assert mismatched == [], (year, mismatched)
+
+
+# --- KNOWN_ISSUESの形状 -----------------------------------------------------
+
+
+def test_known_issues_have_the_required_shape():
+    ids = [issue["id"] for issue in KNOWN_ISSUES]
+    assert len(ids) == len(set(ids)), "KNOWN_ISSUESのidが重複しています"
+    valid_csvs = {"area_beds.csv", "area_bed_report_rate.csv", "area_basic.csv"}
+    for issue in KNOWN_ISSUES:
+        assert set(issue) >= {"id", "scope", "summary", "evidence", "action"}, issue["id"]
+        assert issue["scope"]["csv"] in valid_csvs, issue["id"]
+        assert isinstance(issue["evidence"], list) and issue["evidence"], issue["id"]
+
+
 # --- R6互換性(年度間の列ずれ回帰テスト) --------------------------------
 
-# R6原典には一部ブロックで実績セルが空欄になっている既知の欠測が1件ある
-# (ブロック2「南檜山」の高度急性期 2015実績。派生比率列も原典側で'-'表記
-# されており、レイアウト崩れではなく原典データそのものの欠測)。R6を
-# `parse_sheet` でフル走査すると `expect_int` の整数検証がこの欠測セルで
-# 中断してしまう(R6のCSV出力自体はこのパーサのスコープ外でもある)ため、
-# ここでは値の走査を伴わないヘッダー解決のみで列ずれへの追随を検証する。
+# R6は本番の出力経路(build_and_write)にも乗っており、`parse_sheet()` で
+# フル走査できる(実績セルの欠測1件はEXPECTED_MISSING_BEDSで許容している。
+# 上記「R6: 流出入(net_flow_rate)・実績セル欠測(南檜山)」参照)。このテストは
+# ヘッダー文字列の列ずれ追随(実績年数・見込量の対象年がR6/R7で異なること)を
+# 固定する回帰テストとして残す。
 
 
 def test_r6_r7_year_layout_regression():
@@ -313,6 +490,65 @@ def test_outflow_inflow_label_drift_is_detected():
     assert verify_source("R7/001723349.xlsx") == recorded_hash("R7/001723349.xlsx")
 
 
+def test_r6_net_flow_label_drift_is_detected():
+    """Q列(17)の一般病床患者流出入ラベル(R6)が動いた場合に検知できるか。
+
+    R7のR列(18)とは異なる列(17)・異なる行オフセット(top+4)を使うため、
+    別途検証する。こちらもメモリ上の改変のみで `wb.save()` は呼ばない。
+    """
+    ws, _, _ = load_sheet("R6")
+
+    block = 0
+    label_row = BLOCK_TOP0 + BLOCK_SIZE * block + 4
+    original = ws.cell(row=label_row, column=17).value
+    assert original == "（一般病床患者流出入）"
+
+    ws.cell(row=label_row, column=17).value = "（別のラベル）"
+
+    with pytest.raises(LayoutMismatchError):
+        parse_sheet(ws, published_fy="R6")
+
+    assert verify_source("R6/別添４③（構想区域の病床数等の状況）.xlsx") == recorded_hash(
+        "R6/別添４③（構想区域の病床数等の状況）.xlsx"
+    )
+
+
+# --- R6を含む複数ソースの出力(--source対応) -----------------------------
+
+
+def test_build_and_write_combines_r7_then_r6_in_fixed_order(tmp_path):
+    """build_and_write(["R6", "R7"], ...)のように渡しても、出力行は常に
+    R7が先・R6が後になることを確認する(SOURCE_ORDER固定、呼び出し順に依らない)。
+    """
+    build_and_write(["R6", "R7"], tmp_path)
+    beds_lines = (tmp_path / "area_beds.csv").read_text(encoding="utf-8").splitlines()
+    fy_column = [line.split(",")[0] for line in beds_lines[1:]]
+    assert fy_column[0] == "R7"
+    assert fy_column[-1] == "R6"
+    assert len([i for i in range(1, len(fy_column)) if fy_column[i] != fy_column[i - 1]]) == 1
+
+
+def test_build_and_write_row_counts_for_r7_plus_r6(tmp_path):
+    build_and_write(["R7", "R6"], tmp_path)
+    beds_rows = (tmp_path / "area_beds.csv").read_text(encoding="utf-8").splitlines()
+    rate_rows = (tmp_path / "area_bed_report_rate.csv").read_text(encoding="utf-8").splitlines()
+    basic_rows = (tmp_path / "area_basic.csv").read_text(encoding="utf-8").splitlines()
+    assert len(beds_rows) - 1 == 18645 + 16950
+    assert len(rate_rows) - 1 == 3051 + 2712
+    assert len(basic_rows) - 1 == 339 + 339
+
+
+def test_build_and_write_single_source_r6_only(tmp_path):
+    build_and_write(["R6"], tmp_path)
+    beds_rows = (tmp_path / "area_beds.csv").read_text(encoding="utf-8").splitlines()
+    assert len(beds_rows) - 1 == 16950
+    assert all(line.startswith("R6,") for line in beds_rows[1:])
+
+    meta = json.loads((tmp_path / "area_beds.csv.meta.json").read_text(encoding="utf-8"))
+    assert isinstance(meta["source"], list)
+    assert [s["published_fy"] for s in meta["source"]] == ["R6"]
+
+
 # --- 再現性(バイト一致) -----------------------------------------------------
 
 CSV_NAMES = [
@@ -323,9 +559,12 @@ CSV_NAMES = [
 
 
 def test_reproducibility_byte_identical(tmp_path):
-    paths = build_and_write("R7", tmp_path)
+    # data/processed/ にコミット済みのCSVは既定(--source all = R7+R6)で
+    # 生成したものなので、再現性テストも同じソース集合で再生成して比較する。
+    paths = build_and_write(["R7", "R6"], tmp_path)
     assert paths.keys() == {"beds", "report_rate", "basic"}
-    expected_sha256 = recorded_hash("R7/001723349.xlsx")
+    expected_sha256_r7 = recorded_hash("R7/001723349.xlsx")
+    expected_sha256_r6 = recorded_hash("R6/別添４③（構想区域の病床数等の状況）.xlsx")
 
     for name in CSV_NAMES:
         committed_path = PROCESSED_DIR / name
@@ -340,8 +579,12 @@ def test_reproducibility_byte_identical(tmp_path):
         new_meta = json.loads((tmp_path / f"{name}.meta.json").read_text(encoding="utf-8"))
         old_meta = json.loads((PROCESSED_DIR / f"{name}.meta.json").read_text(encoding="utf-8"))
 
-        assert new_meta["source"]["source_sha256"] == expected_sha256
-        assert old_meta["source"]["source_sha256"] == expected_sha256
+        for meta in (new_meta, old_meta):
+            assert isinstance(meta["source"], list)
+            by_fy = {s["published_fy"]: s for s in meta["source"]}
+            assert set(by_fy) == {"R7", "R6"}
+            assert by_fy["R7"]["source_sha256"] == expected_sha256_r7
+            assert by_fy["R6"]["source_sha256"] == expected_sha256_r6
 
         # processing.date は実行日ごとに変わるため、比較対象から除外する
         new_meta["processing"]["date"] = None

@@ -21,7 +21,7 @@
   },
   "processing": {
     "script": "tools/parse_facility_beds.py",
-    "date": "2026-08-04",
+    "date": "2026-08-05",
     "steps": [
       "verify_source()でR7/001723127.xlsxのSHA-256をSHA256SUMSと照合",
       "openpyxl(data_only=True)でワークブックを開き、シート数がちょうど339であることを検証",

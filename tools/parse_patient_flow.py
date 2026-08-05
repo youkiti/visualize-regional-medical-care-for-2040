@@ -699,11 +699,20 @@ def _load_area_basic_reference():
     """`data/processed/area_basic.csv` から area_code -> 参照情報 の辞書を作る。
 
     区域サマリ行(都道府県名・構想区域名・人口・面積)・相手区域の実在検証に使う。
+
+    001723366.xlsx（構想区域間の患者流入率・流出率）はR7のみで公表されている
+    ファイル(「データ構成」参照。R6版なし)なので、参照先も published_fy=='R7'
+    の行に絞り込む。area_basic.csvはR6/R7がpublished_fyで並存するようになった
+    (M9)ため678行あり、絞り込まずに読むと同じarea_codeがR7行・R6行の順で2回
+    出現し、辞書代入で後勝ち(=R6の値)になってしまう(値そのものはR6/R7で同じ
+    はずだが、この帳票の突合が本来意図しないR6行に依存する状態は避ける)。
     """
     path = REPO_ROOT / "data" / "processed" / "area_basic.csv"
     reference = {}
     with open(path, encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
+            if row["published_fy"] != "R7":
+                continue
             reference[row["area_code"]] = {
                 "pref_code": row["pref_code"],
                 "pref_name": row["pref_name"],
