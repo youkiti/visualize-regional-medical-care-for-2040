@@ -5,8 +5,6 @@ import type { FacilityShardStatus } from '../lib/facilityShard';
 import type { Facility, FacilityMetric, FacilityValueStatus } from '../types';
 
 interface FacilityListProps {
-  /** バンドル済み facility_summary.json 由来。shard未取得でも読み込み中から出せる。 */
-  facilityCount: number;
   status: FacilityShardStatus;
   facilities: Facility[] | null;
   error: string | null;
@@ -74,12 +72,16 @@ function FacilityDetail({
 
   return (
     <div className="facility-detail">
-      <p className="facility-detail-id">
-        施設ID: {facility.record_id}
-        <br />
-        ※原典（病床機能報告個票）の行位置由来の識別子です。公表年度が変わると同じIDが別の施設を
-        指しうるため、年度をまたぐ比較には使えません（同一年度内で同名施設を区別する用途には使えます）。
-      </p>
+      <p className="facility-detail-id">施設ID: {facility.record_id}</p>
+      {/* M14: このIDの由来説明は展開したすべての施設行の先頭に出て嵩むため、
+          IDそのものは常時表示のまま、説明文だけ折りたたむ（brief 2-4）。 */}
+      <details className="note-caution-details">
+        <summary>このIDについて</summary>
+        <p>
+          ※原典（病床機能報告個票）の行位置由来の識別子です。公表年度が変わると同じIDが別の施設を
+          指しうるため、年度をまたぐ比較には使えません（同一年度内で同名施設を区別する用途には使えます）。
+        </p>
+      </details>
       {groups.map((group) => (
         <div className="facility-detail-group" key={group.key}>
           <h4>{group.label}</h4>
@@ -150,8 +152,24 @@ export function computeFacilityCoverage(facilities: Facility[] | null): {
   return { mapped, unmatched, withdrawn, referenceGeocoded, total: list.length };
 }
 
+/**
+ * AreaPanel側のPanelSection（医療機関の章）のnoteに使う「地図に出ている件数」の
+ * 一行サマリ（M14）。M10で「座標カバレッジは常設」と決めた情報が、章を畳むと
+ * 見えなくなるのを防ぐため、summary行に出す（章を開けば本文の
+ * .facility-coverage-noteにも同じ情報が改めて出る）。
+ * このsummary行は章タイトル（「医療機関（{total}件）」）の隣に並ぶため、total件数は
+ * 既にタイトル側に出ている。二重表示を避けるためtotalはここでは出さない。
+ * - facilitiesが未取得(null)または0件 → undefined（noteを出さない）
+ * - 全件が地図に出ている → 「地図に全件」
+ * - 一部だけ地図に出ている → 「地図に{mapped}件」
+ */
+export function facilityCoverageSummary(coverage: ReturnType<typeof computeFacilityCoverage>): string | undefined {
+  if (coverage.total === 0) return undefined;
+  if (coverage.mapped === coverage.total) return '地図に全件';
+  return `地図に${coverage.mapped}件`;
+}
+
 export default function FacilityList({
-  facilityCount,
   status,
   facilities,
   error,
@@ -200,10 +218,14 @@ export default function FacilityList({
     });
   };
 
+  // M14: 外側の<section aria-label="医療機関一覧">と見出し行(.area-panel-
+  // subheading-row、h3＋「一覧をCSV」ボタン)はAreaPanel側のPanelSectionへ移した
+  // （見出し文字列と件数バッジはPanelSectionのtitle/noteが持つ）。ここでは中身
+  // だけを返す。「一覧をCSV」ボタンは<summary>の中に置けない（クリックが開閉と
+  // 二重発火する）ため、本文の先頭に移した。
   return (
-    <section aria-label="医療機関一覧">
-      <div className="area-panel-subheading-row">
-        <h3 className="area-panel-subheading">医療機関（{facilityCount}件）</h3>
+    <>
+      <div className="panel-section-actions">
         <button
           type="button"
           className="download-button"
@@ -345,19 +367,28 @@ export default function FacilityList({
               （国土数値情報P04との名寄せでは座標が得られなかった施設を補完）
             </p>
           )}
-          {coverage.unmatched > 0 && (
-            <p className="facility-legend-note">
-              「地図に表示なし」＝名寄せで位置を一意に特定できなかったため座標を与えていない医療機関です（位置の推測はしません）。
-            </p>
-          )}
-          {coverage.withdrawn > 0 && (
-            <p className="facility-legend-note">
-              「地図に表示なし（座標が不一致）」＝名寄せでは座標が付いたものの、別の公表物（医療情報ネットの公表座標）との
-              検算で1km以上離れていたため、座標を表示していない医療機関です（値の補正はせず、表示を控えています）。
-            </p>
+          {/* M14: 2本の長い説明段落を1つの折りたたみへまとめる（brief 2-3）。
+              どちらの条件も0件ならdetails自体を出さない。中身は既存の2段落を
+              そのまま、それぞれ従来どおり該当件数が0のときは出さない条件を
+              維持する。 */}
+          {(coverage.unmatched > 0 || coverage.withdrawn > 0) && (
+            <details className="note-caution-details">
+              <summary>「地図に表示なし」バッジの意味（詳細）</summary>
+              {coverage.unmatched > 0 && (
+                <p>
+                  「地図に表示なし」＝名寄せで位置を一意に特定できなかったため座標を与えていない医療機関です（位置の推測はしません）。
+                </p>
+              )}
+              {coverage.withdrawn > 0 && (
+                <p>
+                  「地図に表示なし（座標が不一致）」＝名寄せでは座標が付いたものの、別の公表物（医療情報ネットの公表座標）との
+                  検算で1km以上離れていたため、座標を表示していない医療機関です（値の補正はせず、表示を控えています）。
+                </p>
+              )}
+            </details>
           )}
         </>
       )}
-    </section>
+    </>
   );
 }

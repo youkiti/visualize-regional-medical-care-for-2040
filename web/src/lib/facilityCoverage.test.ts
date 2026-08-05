@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeFacilityCoverage, coverageBreakdown } from '../components/FacilityList';
+import { computeFacilityCoverage, coverageBreakdown, facilityCoverageSummary } from '../components/FacilityList';
 import type { Facility } from '../types';
 
 // 地図に出ていない分の内訳文言。0件の理由を書かないこと（その区域に存在しない
@@ -80,5 +80,29 @@ describe('computeFacilityCoverage', () => {
   it('returns all zeros for null/empty facilities without throwing', () => {
     expect(computeFacilityCoverage(null)).toEqual({ mapped: 0, unmatched: 0, withdrawn: 0, referenceGeocoded: 0, total: 0 });
     expect(computeFacilityCoverage([])).toEqual({ mapped: 0, unmatched: 0, withdrawn: 0, referenceGeocoded: 0, total: 0 });
+  });
+});
+
+// facilityCoverageSummary: PanelSection(医療機関の章)のnoteに使う一行サマリ
+// （M14）。章を畳んでも座標カバレッジ(M10で常設と決めた情報)が見えなくなら
+// ないようにするためのもの。
+describe('facilityCoverageSummary', () => {
+  it('returns undefined when there are no facilities (unfetched or empty)', () => {
+    expect(facilityCoverageSummary(computeFacilityCoverage(null))).toBeUndefined();
+    expect(facilityCoverageSummary(computeFacilityCoverage([]))).toBeUndefined();
+  });
+
+  it('returns "地図に全件" when every facility is mapped', () => {
+    const facilities = [makeFacility({ record_id: 'a' }), makeFacility({ record_id: 'b' })];
+    expect(facilityCoverageSummary(computeFacilityCoverage(facilities))).toBe('地図に全件');
+  });
+
+  it('returns "地図に{mapped}件" when only some facilities are mapped', () => {
+    const mapped = makeFacility({ record_id: 'a' });
+    const unmatched = makeFacility({ record_id: 'b', match_status: 'unmatched' });
+    delete (unmatched as Partial<Facility>).coordinates;
+    delete (unmatched as Partial<Facility>).coordinate_source;
+
+    expect(facilityCoverageSummary(computeFacilityCoverage([mapped, unmatched]))).toBe('地図に1件');
   });
 });
