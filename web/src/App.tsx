@@ -1,23 +1,28 @@
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import MapView, { type MapViewHandle } from './components/MapView';
 import Legend from './components/Legend';
 import Controls from './components/Controls';
 import AreaPanel from './components/AreaPanel';
+import BulkDownload from './components/BulkDownload';
 import SourceNotes from './components/SourceNotes';
 import { computeQuantileEdges, isDemandMetric } from './lib/metrics';
 import { useFacilityShard } from './lib/facilityShard';
 import { buildFacilityPoints } from './lib/facilityPoints';
+import { buildAreaDetailCsv, buildAreaTableCsv, buildFacilityCsv } from './lib/downloads';
+import { triggerDownload } from './lib/triggerDownload';
 import mapDataUrl from './generated/area_map.json?url';
 import indicatorsJson from './generated/area_indicators.json';
 import demandJson from './generated/area_demand.json';
 import areaIndexJson from './generated/area_index.json';
 import facilitySummaryJson from './generated/facility_summary.json';
+import downloadManifestJson from './generated/download_manifest.json';
 import type {
   AreaDemandData,
   AreaIndexEntry,
   AreaIndicatorsData,
   BedFunctionKey,
+  DownloadManifest,
   FacilitySummaryData,
   MetricKind,
 } from './types';
@@ -47,6 +52,14 @@ const areaIndexByCode = new Map(areaIndex.map((entry) => [entry.area_code, entry
 // useFacilityShard (web/public/facilities/<area_code>.json), not bundled here.
 const facilitySummary = facilitySummaryJson as unknown as FacilitySummaryData;
 const facilitySummaryByCode = new Map(facilitySummary.areas.map((a) => [a.area_code, a]));
+
+// generated/download_manifest.json describes the bulk-download build
+// artifacts under web/public/downloads/ (the processed-CSV ZIP and the
+// standalone boundaries GeoJSON copy) — see types.ts DownloadManifest for why
+// this isn't reusing any of the *_R7.json-derived types above (it has no
+// source/processing/known_issues block; it's a manifest of build outputs,
+// not a copy/summary of a data/processed/ source of truth).
+const downloadManifest = downloadManifestJson as unknown as DownloadManifest;
 
 // サイトの主題(「2040年に向けた地域医療構想」)に合わせ、需要指標選択時の初期年度は
 // 2040年度にする(バックアップとしてyearsに2040が無い場合は先頭年度)。
@@ -129,6 +142,48 @@ export default function App() {
     }
   };
 
+  // 以下3つのダウンロードハンドラは、いずれもlib/downloads.tsの純関数で
+  // CSV本文を組み立て、lib/triggerDownload.tsでブラウザに保存させるだけ
+  // （新しいデータ処理はここに書かない）。ボタン側で無効化される条件
+  // （選択区域なし・shard未取得）を、念のためハンドラ内でも防御的に握る。
+
+  // 今の指標・病床機能・年度のまま、全339区域ぶんをCSVにする(Controls「表示中のデータをCSV」)。
+  const handleDownloadAreaTable = useCallback(() => {
+    const { filename, text } = buildAreaTableCsv({ indicators, demand, metric, bedFunction, year: selectedYear });
+    triggerDownload(filename, text);
+  }, [metric, bedFunction, selectedYear]);
+
+  // 選択中の区域1つの指標をCSVにする(AreaPanel「この区域の指標をCSV」)。
+  const handleDownloadAreaDetail = useCallback(() => {
+    if (!selectedArea) return;
+    const { filename, text } = buildAreaDetailCsv({
+      area: selectedArea,
+      demandArea: selectedDemandArea,
+      indicatorsMetadata: indicators.metadata,
+      demandMetadata: demand.metadata,
+      functions: indicators.functions,
+      functionLabels: indicators.function_labels,
+      demandCategories: demand.categories,
+      demandCategoryLabels: demand.category_labels,
+      demandYears: demand.years,
+      demandYearLabels: demand.year_labels,
+      baselineYear: demand.baseline_year,
+    });
+    triggerDownload(filename, text);
+  }, [selectedArea, selectedDemandArea]);
+
+  // 選択中の区域の医療機関一覧をCSVにする(FacilityList「一覧をCSV」)。
+  const handleDownloadFacilities = useCallback(() => {
+    if (!facilityShard) return;
+    const { filename, text } = buildFacilityCsv({
+      shard: facilityShard,
+      metrics: facilitySummary.metrics,
+      valueStatusLabels: facilitySummary.value_status_labels,
+      facilitySummaryMetadata: facilitySummary.metadata,
+    });
+    triggerDownload(filename, text);
+  }, [facilityShard]);
+
   return (
     <div className="app">
       <header className="app-header">
@@ -164,6 +219,7 @@ export default function App() {
             areas={indicators.areas}
             onSelectArea={handleSearchSelect}
             onResetView={handleResetView}
+            onDownloadAreaTable={handleDownloadAreaTable}
             years={demand.years}
             yearLabels={demand.year_labels}
             yearIndex={yearIndex}
@@ -197,12 +253,15 @@ export default function App() {
               onRetryFacilities={retryFacilities}
               facilityMetrics={facilitySummary.metrics}
               facilityValueStatusLabels={facilitySummary.value_status_labels}
+              onDownloadAreaDetail={handleDownloadAreaDetail}
+              onDownloadFacilities={handleDownloadFacilities}
             />
           ) : (
             <p className="area-panel-placeholder">
               地図上の区域をクリックするか、区域検索で選ぶと詳細が表示されます。
             </p>
           )}
+          <BulkDownload manifest={downloadManifest} />
           <SourceNotes
             metadata={indicators.metadata}
             demandMetadata={demand.metadata}

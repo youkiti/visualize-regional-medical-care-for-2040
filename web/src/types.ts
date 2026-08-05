@@ -336,3 +336,48 @@ export interface FacilitySummaryData {
   /** facilities配列を含まない軽量な339区域ぶんの件数一覧。 */
   areas: FacilitySummaryArea[];
 }
+
+// ---- Bulk download manifest (generated/download_manifest.json) ------------
+//
+// Mirrors web/src/generated/download_manifest.json (written by
+// web/scripts/sync-data.mjs, see its "8. download_manifest.json" comment for
+// the exact construction). Deliberately NOT reusing any AreaIndicators*/
+// AreaDemand*/FacilitySummary* type above — this JSON isn't a copy or a
+// summary of a data/processed/*_R7.json source of truth like those are; it
+// describes two independently-built build artifacts (the ZIP bundle under
+// web/public/downloads/ and the standalone boundaries GeoJSON copy) plus the
+// 13 CSVs packed into the ZIP, so its shape has nothing in common with the
+// others (no `source`/`processing`/`known_issues` metadata block at all).
+
+/** download_manifest.json の `bundle`: 加工済みCSV一括ダウンロードZIP本体の説明。 */
+export interface DownloadManifestBundle {
+  file: string;
+  bytes: number;
+  sha256: string;
+  /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
+  entry_count: number;
+  /** ZIP内のCSV本数（13）。entry_countとは別に持つ: UIの「CSV13本＋…」表記に使う。 */
+  csv_count: number;
+}
+
+/** download_manifest.json の `boundaries`: 区域境界GeoJSON単体コピーの説明。ZIPには含まれない。 */
+export interface DownloadManifestBoundaries {
+  file: string;
+  bytes: number;
+  sha256: string;
+}
+
+/** download_manifest.json の `members[]`: ZIPに収録されたCSV1本ぶんの説明（.meta.jsonは含まない）。 */
+export interface DownloadManifestMember {
+  name: string;
+  title: string;
+  bytes: number;
+  rows: number;
+  sha256: string;
+}
+
+export interface DownloadManifest {
+  bundle: DownloadManifestBundle;
+  boundaries: DownloadManifestBoundaries;
+  members: DownloadManifestMember[];
+}

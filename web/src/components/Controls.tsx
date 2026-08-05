@@ -12,6 +12,8 @@ interface ControlsProps {
   areas: AreaIndicator[];
   onSelectArea: (areaCode: string) => void;
   onResetView: () => void;
+  /** 今の指標・病床機能・年度のまま、全339区域ぶんをCSVでダウンロードする（lib/downloads.ts buildAreaTableCsv）。 */
+  onDownloadAreaTable: () => void;
   /** area_demand.json の years/year_labels（西暦の配列と、年の文字列 -> 年度ラベル原文）。 */
   years: number[];
   yearLabels: Record<string, string>;
@@ -41,6 +43,7 @@ export default function Controls({
   areas,
   onSelectArea,
   onResetView,
+  onDownloadAreaTable,
   years,
   yearLabels,
   yearIndex,
@@ -117,6 +120,13 @@ export default function Controls({
       <div className="controls-group">
         <button type="button" onClick={onResetView}>
           全国表示に戻す
+        </button>
+        <button
+          type="button"
+          onClick={onDownloadAreaTable}
+          title="地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします"
+        >
+          表示中のデータをCSV
         </button>
       </div>
     </div>
