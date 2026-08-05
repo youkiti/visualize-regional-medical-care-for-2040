@@ -253,15 +253,30 @@ export function buildAreaMap(boundaries, indicators, demand, yoy) {
  *
  * @param {{features: Array<{properties: Record<string, unknown>, geometry: unknown}>}} boundaries
  * @param {{categories: string[], years: number[], baseline_year: number, prefectures: Array<Record<string, unknown>>}} indicators
+ * @param {{functions: string[], prefectures: Array<Record<string, unknown>>}} yoy
  * @returns {{
  *   type: 'FeatureCollection',
  *   features: Array<{type: 'Feature', properties: Record<string, string | number>, geometry: unknown}>
  * }}
  */
-export function buildPrefectureMap(boundaries, indicators) {
+export function buildPrefectureMap(boundaries, indicators, yoy) {
   const boundaryCodes = boundaries.features.map((f) => f.properties.pref_code);
   const boundaryCodeSet = new Set(boundaryCodes);
   const indicatorCodeSet = new Set(indicators.prefectures.map((p) => p.pref_code));
+
+  // 年度間比較(prefecture_yoy_R6_R7.json)も同じ47都道府県を持つ。全国は
+  // national キーにあり prefectures 配列には無いので、集合は指標側と一致する。
+  const yoyCodeSet = new Set(yoy.prefectures.map((p) => p.pref_code));
+  const missingInYoy = [...boundaryCodeSet].filter((c) => !yoyCodeSet.has(c));
+  const missingInBoundariesFromYoy = [...yoyCodeSet].filter((c) => !boundaryCodeSet.has(c));
+  if (missingInYoy.length > 0 || missingInBoundariesFromYoy.length > 0) {
+    throw new Error(
+      'buildPrefectureMap: pref_code sets differ between boundaries and yoy. ' +
+        `missing_in_yoy=${JSON.stringify(missingInYoy)} ` +
+        `missing_in_boundaries=${JSON.stringify(missingInBoundariesFromYoy)}`
+    );
+  }
+  const yoyByCode = new Map(yoy.prefectures.map((p) => [p.pref_code, p]));
 
   const missingInIndicators = [...boundaryCodeSet].filter((c) => !indicatorCodeSet.has(c));
   const missingInBoundaries = [...indicatorCodeSet].filter((c) => !boundaryCodeSet.has(c));
@@ -277,6 +292,7 @@ export function buildPrefectureMap(boundaries, indicators) {
 
   const features = boundaries.features.map((feature) => {
     const pref = indicatorByCode.get(feature.properties.pref_code);
+    const yoyPref = yoyByCode.get(feature.properties.pref_code);
 
     /** @type {Record<string, string | number>} */
     const props = {
@@ -321,6 +337,40 @@ export function buildPrefectureMap(boundaries, indicators) {
         }
         props[demandValueKey(category, year)] = value;
         props[demandRatioKey(category, year)] = value / baseline;
+      }
+    }
+
+    // YoY (R6→R7 公表年度間比較)。プロパティ名は区域層と同一なので、地図・凡例・
+    // ツールチップ(MapView/Legend/metrics.ts)は層を意識せずそのまま読める。
+    // 分母0のときキー自体を省く規約も buildAreaMap と揃える(実データでは都道府県層に
+    // 分母0は無いが、規約を分岐させない ―― r_<fn> と同じ理由)。
+    for (const fn of yoy.functions) {
+      const beds = yoyPref.beds[fn];
+      if (
+        !beds ||
+        typeof beds.plan_2025 !== 'number' ||
+        typeof beds.actual_2025 !== 'number' ||
+        typeof beds.actual_2024 !== 'number'
+      ) {
+        throw new Error(`buildPrefectureMap: yoy beds.${fn} missing/non-numeric for prefecture ${pref.pref_code}`);
+      }
+      // ツールチップは分子(実績2025)を a_<fn>(指標データセット由来)から読み、
+      // 分母を y_plan_/y_a24_(年度間比較データセット由来)から読む。2つのデータセットは
+      // 同じ prefecture_beds.csv のR7実績2025から作られるので必ず一致するはずで、
+      // 一致しないなら片方の生成が古い。黙って別々の数字を並べるより落とす。
+      if (pref.beds[fn].actual_2025 !== beds.actual_2025) {
+        throw new Error(
+          `buildPrefectureMap: actual_2025 differs between indicators and yoy for prefecture ` +
+            `${pref.pref_code} ${fn}: indicators=${pref.beds[fn].actual_2025} yoy=${beds.actual_2025}`
+        );
+      }
+      props[yoyPlanValueKey(fn)] = beds.plan_2025;
+      props[yoyActual2024Key(fn)] = beds.actual_2024;
+      if (beds.plan_2025 !== 0) {
+        props[yoyPlanRatioKey(fn)] = beds.actual_2025 / beds.plan_2025;
+      }
+      if (beds.actual_2024 !== 0) {
+        props[yoyChangeRatioKey(fn)] = beds.actual_2025 / beds.actual_2024;
       }
     }
 

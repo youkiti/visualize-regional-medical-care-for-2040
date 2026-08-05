@@ -6,6 +6,7 @@ import type {
   FacilitySummaryMetadata,
   KnownIssue,
   PrefectureIndicatorsMetadata,
+  PrefectureYoyMetadata,
 } from '../types';
 
 interface SourceNotesProps {
@@ -17,6 +18,7 @@ interface SourceNotesProps {
    * （その間は「患者の流入・流出」の出典ブロックそのものを描画しない）。 */
   flowMetadata: AreaFlowMetadata | null;
   prefectureMetadata: PrefectureIndicatorsMetadata;
+  prefectureYoyMetadata: PrefectureYoyMetadata;
 }
 
 /**
@@ -53,6 +55,7 @@ export default function SourceNotes({
   yoyMetadata,
   flowMetadata,
   prefectureMetadata,
+  prefectureYoyMetadata,
 }: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
   const demandSource = demandMetadata.source;
@@ -314,6 +317,48 @@ export default function SourceNotes({
       </p>
 
       <KnownIssues issues={prefectureMetadata.known_issues} label="データの既知の問題（都道府県）" />
+
+      {/* 都道府県層の年度間比較。出典（R7/R6の2要素配列）は区域側と同じ原典
+          ファイルだが、都道府県版は別添４②（001722915.xlsx）で区域版の
+          別添４③（001723349.xlsx）とは別ファイルなので、省略せず改めて出す。 */}
+      <p>
+        <strong>公表年度間の比較（R6→R7）の出典</strong>
+      </p>
+      <p className="caveat">{prefectureYoyMetadata.processing.caveat}</p>
+      {prefectureYoyMetadata.source.map((s) => (
+        <dl key={s.published_fy}>
+          <dt>公表年度区分</dt>
+          <dd>{s.published_fy}公表分</dd>
+          <dt>データ名</dt>
+          <dd>{s.name}</dd>
+          <dt>公表元</dt>
+          <dd>{s.publisher}</dd>
+          <dt>公表年度</dt>
+          <dd>{s.fiscal_year}</dd>
+          <dt>ファイル</dt>
+          <dd>
+            <a href={s.url} target="_blank" rel="noreferrer">
+              {s.url}
+            </a>
+            {s.source_note ? `（${s.source_note}）` : ''}
+          </dd>
+          <dt>掲載ページ</dt>
+          <dd>
+            <a href={s.page_url} target="_blank" rel="noreferrer">
+              {s.page_url}
+            </a>
+          </dd>
+          <dt>取得日</dt>
+          <dd>{s.acquired_date}</dd>
+          <dt>利用規約</dt>
+          <dd>{s.license}</dd>
+        </dl>
+      ))}
+
+      <KnownIssues
+        issues={prefectureYoyMetadata.known_issues}
+        label="データの既知の問題（都道府県の公表年度間の比較）"
+      />
 
       {/* flowMetadataはarea_flow.jsonの遅延取得(区域を選ぶまでfetchしない)分、
           区域未選択の間はnull — その間はブロックごと出さない(brief記載どおり)。

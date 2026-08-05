@@ -358,10 +358,20 @@ export interface Facility {
   value_status: FacilityValueStatus[];
   /** 該当する機能が無い施設ではキー自体が省略される（0件を意味する空配列にはしない）。 */
   functions?: string[];
-  /** 'matched'=座標あり / 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。 */
+  /**
+   * P04名寄せの結果そのもの。'matched'=名寄せでは座標が付いた /
+   * 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。
+   * **match_status==='matched' でも coordinates を持つとは限らない**（下記 coordinate_withdrawn）。
+   */
   match_status: FacilityMatchStatus;
-  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' のときのみ存在する。 */
+  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' かつ検算で取り下げていない施設のみ存在する。 */
   coordinates?: [number, number];
+  /**
+   * trueなら、P04名寄せでは座標が付いたが、医療情報ネットの公表座標との検算で1km以上
+   * 離れていた（doc/FACILITY_GEO_AUDIT.md）ため座標を出していないことを表す。
+   * 該当しない施設ではキー自体が省略される。座標を「補正した」のではなく「出さない」措置。
+   */
+  coordinate_withdrawn?: boolean;
 }
 
 /** web/public/facilities/<area_code>.json の形。区域選択時に個別取得する（バンドルしない）。 */
@@ -371,7 +381,10 @@ export interface FacilityShard {
   pref_code: string;
   pref_name: string;
   facility_count: number;
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
   geocoded_count: number;
+  /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
+  coordinate_withdrawn_count: number;
   facilities: Facility[];
 }
 
@@ -379,7 +392,10 @@ export interface FacilityShard {
 export interface FacilitySummaryArea {
   area_code: string;
   facility_count: number;
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
   geocoded_count: number;
+  /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
+  coordinate_withdrawn_count: number;
 }
 
 /** facility_basic/facility_observations/facility_functionsの3CSV共通の出典（R7/001723127.xlsx由来）。 */
@@ -463,7 +479,7 @@ export interface DownloadManifestBundle {
   sha256: string;
   /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
   entry_count: number;
-  /** ZIP内のCSV本数（16）。entry_countとは別に持つ: UIの「CSV16本＋…」表記に使う。 */
+  /** ZIP内のCSV本数（17）。entry_countとは別に持つ: UIの「CSV17本＋…」表記に使う。 */
   csv_count: number;
 }
 
@@ -692,10 +708,91 @@ export interface PrefectureMapFeatureProperties {
   a_chronic: number;
   n_chronic: number;
   r_chronic?: number;
+  // YoY (R6→R7公表年度間比較)。キー名も省略規約も AreaMapFeatureProperties と同一
+  // （metrics.ts の yoyPlanRatioKey 等が層を問わずそのまま読める）。実データでは
+  // 都道府県層に分母0が無いので比のキーも常に存在するが、型では区域側と同じく
+  // optional にして「無ければ算出不可」の読み方を層で分岐させない。
+  y_plan_total: number;
+  y_a24_total: number;
+  y_pa_total?: number;
+  y_yy_total?: number;
+  y_plan_high_acute: number;
+  y_a24_high_acute: number;
+  y_pa_high_acute?: number;
+  y_yy_high_acute?: number;
+  y_plan_acute: number;
+  y_a24_acute: number;
+  y_pa_acute?: number;
+  y_yy_acute?: number;
+  y_plan_recovery: number;
+  y_a24_recovery: number;
+  y_pa_recovery?: number;
+  y_yy_recovery?: number;
+  y_plan_chronic: number;
+  y_a24_chronic: number;
+  y_pa_chronic?: number;
+  y_yy_chronic?: number;
   bb_w: number;
   bb_s: number;
   bb_e: number;
   bb_n: number;
+}
+
+// ---- Prefecture year-over-year (prefecture_yoy_R6_R7.json /
+// generated/prefecture_yoy.json) --------------------------------------------
+//
+// Mirrors data/processed/prefecture_yoy_R6_R7.json
+// (tools/build_web_prefecture_yoy.py). 構想区域側の AreaYoy* と**指標の定義は
+// 同一**（見込量比・実績の1年変化）だが、型は使い回さない:
+//   - エンティティが area_code ではなく pref_code
+//   - 全国が `prefectures[]` の外の `national` キーにいる
+//     （prefecture_indicators_R7.json と同じ分け方。境界GeoJSONに全国のフィーチャが
+//     無いため。CLAUDE.md 罠11 と同じく、形が違う metadata を1つの型で兼用しない）
+//
+// 都道府県層に固有の性質（区域層より素直）:
+//   - actual_2024 は R6/R7 のどちらから採っても同じ値（ビルド時の検証9で240キー
+//     全一致を固定している）。区域側の `area_yoy_2024_actual_from_r6` に相当する
+//     判断が要らないので、known_issues にもその項目は無い
+//   - plan_2025 / actual_2024 に 0 が無いので「算出不可」が発生しない
+
+export interface PrefectureYoyBeds {
+  /** R6公表分の2025年見込量（床）。R7公表分の見込量は2026年が対象なので使えない。 */
+  plan_2025: number;
+  /** R7公表分の2025年実績病床数（床）。 */
+  actual_2025: number;
+  /** R6公表分の2024年実績病床数（床）。都道府県層ではR7公表分と全キー一致する。 */
+  actual_2024: number;
+}
+
+/** 1都道府県（または全国）ぶんの年度間比較。national と prefectures[] で同じ形。 */
+export interface PrefectureYoyEntry {
+  /** ゼロ埋め2桁。全国は '00'（national のみ）。 */
+  pref_code: string;
+  pref_name: string;
+  /** R6公表分の2024年病床機能報告の報告率（0〜1）。 */
+  report_rate_2024: number;
+  /** R7公表分の2025年病床機能報告の報告率（0〜1）。 */
+  report_rate_2025: number;
+  beds: Record<BedFunctionKey, PrefectureYoyBeds>;
+}
+
+export interface PrefectureYoyMetadata {
+  title: string;
+  /** R7/R6の2要素配列（AreaYoyMetadata.source と同形。罠31）。 */
+  source: AreaYoySourceEntry[];
+  processing: AreaYoyProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface PrefectureYoyData {
+  metadata: PrefectureYoyMetadata;
+  functions: BedFunctionKey[];
+  function_labels: Record<BedFunctionKey, string>;
+  /** 全国（pref_code='00'）。境界を持たないため prefectures[] とは分けられている。 */
+  national: PrefectureYoyEntry;
+  /** 47都道府県（pref_codeの昇順）。全国は含まない。 */
+  prefectures: PrefectureYoyEntry[];
 }
 
 /** 地図の表示単位。'area'=339構想区域（主表示）、'pref'=47都道府県（概観）。 */

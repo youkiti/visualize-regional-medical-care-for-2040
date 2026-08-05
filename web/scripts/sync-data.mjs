@@ -5,6 +5,7 @@
 // data/processed/area_yoy_R6_R7.json,
 // data/processed/area_flow_R7.json,
 // data/processed/prefecture_indicators_R7.json,
+// data/processed/prefecture_yoy_R6_R7.json,
 // data/processed/prefecture_boundaries_R7.geojson (the single source of truth,
 // owned by the Python pipeline — see CLAUDE.md) and the 16 tidy CSVs +
 // .meta.json files under data/processed/, and writes the generated
@@ -19,8 +20,9 @@
 //                                                selection independent of the map's
 //                                                load/viewport state (see App.tsx)
 //   web/src/generated/prefecture_indicators.json — verbatim copy (overview layer)
+//   web/src/generated/prefecture_yoy.json     — verbatim copy (overview layer の R6→R7比較)
 //   web/src/generated/pref_map.json           — 47 prefecture boundaries + the same flat
-//                                                indicator/demand props as area_map.json
+//                                                indicator/demand/yoy props as area_map.json
 //   web/src/generated/facility_summary.json   — bundled, lightweight (no facilities[])
 //                                                summary of area_facilities_R7.json
 //   web/public/facilities/<area_code>.json    — per-area facility shard (339 files),
@@ -81,6 +83,7 @@ const facilitiesPath = path.join(repoRoot, 'data', 'processed', 'area_facilities
 const yoyPath = path.join(repoRoot, 'data', 'processed', 'area_yoy_R6_R7.json');
 const flowPath = path.join(repoRoot, 'data', 'processed', 'area_flow_R7.json');
 const prefIndicatorsPath = path.join(repoRoot, 'data', 'processed', 'prefecture_indicators_R7.json');
+const prefYoyPath = path.join(repoRoot, 'data', 'processed', 'prefecture_yoy_R6_R7.json');
 const prefBoundariesPath = path.join(repoRoot, 'data', 'processed', 'prefecture_boundaries_R7.geojson');
 const processedDir = path.join(repoRoot, 'data', 'processed');
 const generatedDir = path.join(webDir, 'src', 'generated');
@@ -94,7 +97,13 @@ const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for
 const EXPECTED_FEATURE_COUNT = 339;
 const EXPECTED_PREFECTURE_COUNT = 47;
 const EXPECTED_FACILITY_TOTAL = 11760;
-const EXPECTED_GEOCODED_TOTAL = 10244;
+// P04名寄せ（facility_geo_linkage.csv）が座標を与えた件数。
+const EXPECTED_MATCHED_TOTAL = 10244;
+// うち、医療情報ネットの公表座標との検算で1km以上離れていたため座標を出さない件数
+// （doc/FACILITY_GEO_AUDIT.md / doc/DECISION_FACILITY_COORDINATES.md）。
+const EXPECTED_COORDINATE_WITHDRAWN_TOTAL = 76;
+// 実際に地図へ点として出る件数。
+const EXPECTED_GEOCODED_TOTAL = EXPECTED_MATCHED_TOTAL - EXPECTED_COORDINATE_WITHDRAWN_TOTAL;
 const EXPECTED_YOY_FUNCTIONS = ['total', 'high_acute', 'acute', 'recovery', 'chronic'];
 // 339区域 × directions(2) × phases(3)。area_flow_R7.json のグループ総数
 // （tools/build_web_flow.py の検証13と同じ数）。
@@ -165,6 +174,7 @@ function main() {
   const yoy = readJson(yoyPath, 'area_yoy_R6_R7.json');
   const flowData = readJson(flowPath, 'area_flow_R7.json');
   const prefIndicators = readJson(prefIndicatorsPath, 'prefecture_indicators_R7.json');
+  const prefYoy = readJson(prefYoyPath, 'prefecture_yoy_R6_R7.json');
   const prefBoundaries = readJson(prefBoundariesPath, 'prefecture_boundaries_R7.geojson');
 
   const features = boundaries.data.features;
@@ -354,6 +364,7 @@ function main() {
   const facilityMetricsCount = facilitiesData.data.metrics.length;
   let totalFacilityCount = 0;
   let totalGeocodedCount = 0;
+  let totalWithdrawnCount = 0;
   for (const area of facilityAreas) {
     if (!Array.isArray(area.facilities) || area.facilities.length !== area.facility_count) {
       fail(
@@ -365,6 +376,7 @@ function main() {
     totalFacilityCount += area.facility_count;
 
     let actualGeocoded = 0;
+    let actualWithdrawn = 0;
     for (const facility of area.facilities) {
       if (facility.values.length !== facilityMetricsCount || facility.value_status.length !== facilityMetricsCount) {
         fail(
@@ -372,6 +384,33 @@ function main() {
             `values.length=${facility.values.length} value_status.length=${facility.value_status.length}, ` +
             `expected ${facilityMetricsCount}`
         );
+      }
+
+      // 座標を持たない理由は2通りある: 名寄せで特定できなかった（match_status
+      // !== 'matched'）か、検算で否定された（coordinate_withdrawn）か。後者は
+      // match_status==='matched' のまま座標を持たないので、**match_status から
+      // 座標の有無を導いてはいけない**。
+      if (facility.coordinate_withdrawn !== undefined) {
+        actualWithdrawn += 1;
+        if (facility.coordinate_withdrawn !== true) {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} has ` +
+              `coordinate_withdrawn=${JSON.stringify(facility.coordinate_withdrawn)} (expected true or absent)`
+          );
+        }
+        if (facility.match_status !== 'matched') {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} is ` +
+              `coordinate_withdrawn but match_status=${JSON.stringify(facility.match_status)} ` +
+              '(only a name-matched facility can have its coordinate withdrawn)'
+          );
+        }
+        if ('coordinates' in facility) {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} is ` +
+              'coordinate_withdrawn but still carries coordinates'
+          );
+        }
       }
 
       if ('coordinates' in facility) {
@@ -403,7 +442,15 @@ function main() {
           `match the number of facilities with coordinates (${actualGeocoded})`
       );
     }
+    if (actualWithdrawn !== area.coordinate_withdrawn_count) {
+      fail(
+        `area_facilities_R7.json: area ${area.area_code} coordinate_withdrawn_count ` +
+          `(${area.coordinate_withdrawn_count}) does not match the number of facilities with ` +
+          `coordinate_withdrawn (${actualWithdrawn})`
+      );
+    }
     totalGeocodedCount += area.geocoded_count;
+    totalWithdrawnCount += area.coordinate_withdrawn_count;
   }
 
   if (totalFacilityCount !== EXPECTED_FACILITY_TOTAL) {
@@ -416,6 +463,18 @@ function main() {
     fail(
       `area_facilities_R7.json: total geocoded_count across areas must be exactly ${EXPECTED_GEOCODED_TOTAL}, ` +
         `got ${totalGeocodedCount}`
+    );
+  }
+  if (totalWithdrawnCount !== EXPECTED_COORDINATE_WITHDRAWN_TOTAL) {
+    fail(
+      'area_facilities_R7.json: total coordinate_withdrawn_count across areas must be exactly ' +
+        `${EXPECTED_COORDINATE_WITHDRAWN_TOTAL}, got ${totalWithdrawnCount}`
+    );
+  }
+  if (totalGeocodedCount + totalWithdrawnCount !== EXPECTED_MATCHED_TOTAL) {
+    fail(
+      'area_facilities_R7.json: geocoded + withdrawn must equal the number of name-matched facilities ' +
+        `(${EXPECTED_MATCHED_TOTAL}), got ${totalGeocodedCount + totalWithdrawnCount}`
     );
   }
   // --- end area_facilities_R7.json validation ---------------------------
@@ -701,9 +760,60 @@ function main() {
     );
   }
 
+  // --- prefecture_yoy_R6_R7.json validation ------------------------------
+  // 構想区域側(area_yoy_R6_R7.json)と同じ形の検証。全国は prefectures 配列では
+  // なく national キーに分かれている点だけが違う(境界GeoJSONに全国のフィーチャが
+  // 無いため。tools/build_web_prefecture_yoy.py 参照)。
+  //
+  // 「指標データセットと年度間比較データセットで actual_2025 が一致すること」は
+  // buildPrefectureMap 側で全都道府県×5機能について検証している(区域側はこの
+  // ファイルで検証しているが、都道府県側は両データセットが出会う場所が
+  // buildPrefectureMap しか無いためそちらに置いた)。
+  const prefYoyPrefectures = prefYoy.data.prefectures;
+  if (!Array.isArray(prefYoyPrefectures) || prefYoyPrefectures.length !== EXPECTED_PREFECTURE_COUNT) {
+    fail(
+      `prefecture_yoy_R6_R7.json: "prefectures" must have exactly ${EXPECTED_PREFECTURE_COUNT} entries, got ${
+        Array.isArray(prefYoyPrefectures) ? prefYoyPrefectures.length : typeof prefYoyPrefectures
+      }`
+    );
+  }
+  if (!prefYoy.data.national || prefYoy.data.national.pref_code !== '00') {
+    fail('prefecture_yoy_R6_R7.json: "national" is missing or is not pref_code "00"');
+  }
+
+  const prefYoyCodeSet = new Set(prefYoyPrefectures.map((p) => p.pref_code));
+  if (prefYoyCodeSet.size !== prefYoyPrefectures.length) {
+    fail('duplicate pref_code found among prefecture_yoy_R6_R7.json prefectures');
+  }
+  const prefYoyMissingVsBoundaries = [...prefBoundaryCodeSet].filter((c) => !prefYoyCodeSet.has(c));
+  const boundariesMissingVsPrefYoy = [...prefYoyCodeSet].filter((c) => !prefBoundaryCodeSet.has(c));
+  if (prefYoyMissingVsBoundaries.length > 0 || boundariesMissingVsPrefYoy.length > 0) {
+    fail(
+      'prefecture_yoy_R6_R7.json pref_code set differs from prefecture boundaries. ' +
+        `missing_in_yoy=${JSON.stringify(prefYoyMissingVsBoundaries)} ` +
+        `missing_in_boundaries=${JSON.stringify(boundariesMissingVsPrefYoy)}`
+    );
+  }
+
+  // 機能キーが構想区域側と同一であること。片方だけ増減すると、地図が読む
+  // y_pa_<fn>/y_yy_<fn> が層によって食い違って静かに無色になる(罠10と同じ経路)。
+  if (JSON.stringify(prefYoy.data.functions) !== JSON.stringify(EXPECTED_YOY_FUNCTIONS)) {
+    fail(
+      `prefecture_yoy_R6_R7.json: "functions" must equal ${JSON.stringify(EXPECTED_YOY_FUNCTIONS)}, ` +
+        `got ${JSON.stringify(prefYoy.data.functions)}`
+    );
+  }
+  if (JSON.stringify(prefYoy.data.functions) !== JSON.stringify(yoy.data.functions)) {
+    fail(
+      'prefecture_yoy_R6_R7.json functions differ from area_yoy_R6_R7.json: ' +
+        `${JSON.stringify(prefYoy.data.functions)} vs ${JSON.stringify(yoy.data.functions)}`
+    );
+  }
+  // --- end prefecture_yoy_R6_R7.json validation --------------------------
+
   let prefMap;
   try {
-    prefMap = buildPrefectureMap(prefBoundaries.data, prefIndicators.data);
+    prefMap = buildPrefectureMap(prefBoundaries.data, prefIndicators.data, prefYoy.data);
   } catch (err) {
     fail(`buildPrefectureMap failed: ${err.message}`);
     return; // unreachable
@@ -727,6 +837,19 @@ function main() {
           if (typeof props[key] !== 'number' || !Number.isFinite(props[key])) {
             fail(`prefecture feature ${props.pref_code} has a non-finite ${key}: ${props[key]}`);
           }
+        }
+      }
+    }
+    // YoY (R6→R7): 区域側と同じ規約(生値は常にある／比は分母0のときキーごと省く)。
+    // 実データでは都道府県層に分母0が無いので比のキーも常に存在するはずだが、
+    // 「無ければ算出不可」の読み方は層で分岐させない。
+    for (const fn of BED_FUNCTIONS) {
+      if (typeof props[yoyPlanValueKey(fn)] !== 'number' || typeof props[yoyActual2024Key(fn)] !== 'number') {
+        fail(`prefecture feature ${props.pref_code} is missing ${yoyPlanValueKey(fn)}/${yoyActual2024Key(fn)}`);
+      }
+      for (const key of [yoyPlanRatioKey(fn), yoyChangeRatioKey(fn)]) {
+        if (key in props && (typeof props[key] !== 'number' || !Number.isFinite(props[key]))) {
+          fail(`prefecture feature ${props.pref_code} has a non-finite ${key}: ${props[key]}`);
         }
       }
     }
@@ -775,6 +898,14 @@ function main() {
   fs.writeFileSync(
     path.join(generatedDir, 'prefecture_indicators.json'),
     prefIndicators.raw.replace(/\r\n/g, '\n')
+  );
+
+  // 3b-2. prefecture_yoy.json — verbatim copy(同上)。47都道府県+全国ぶんで
+  //     約47KBなので、区域側の area_yoy.json と同じくバンドルして都道府県パネル・
+  //     出典表示・CSVに使う。
+  fs.writeFileSync(
+    path.join(generatedDir, 'prefecture_yoy.json'),
+    prefYoy.raw.replace(/\r\n/g, '\n')
   );
 
   // 3c. pref_map.json — 概観レイヤの地図データ。area_map.json と同じく
@@ -853,6 +984,7 @@ function main() {
       `area_map.json (${areaMap.features.length} features), ` +
       `area_index.json (${areaIndex.length} entries), ` +
       `prefecture_indicators.json (${prefectures.length} prefectures + national), ` +
+      `prefecture_yoy.json (${prefYoyPrefectures.length} prefectures + national), ` +
       `pref_map.json (${prefMap.features.length} features) to ${path.relative(repoRoot, generatedDir)}; ` +
       `wrote ${facilityAreas.length} facility shards ` +
       `(total ${totalShardBytes.toLocaleString('en-US')} bytes, max ${maxShardBytes.toLocaleString('en-US')} bytes) ` +
@@ -861,7 +993,7 @@ function main() {
   );
 
   // 6. web/public/downloads/<BUNDLE_FILE_NAME> — data/processed/ の加工済み
-  //    CSV16本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
+  //    CSV17本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
   //    と同じ理由でディレクトリを一掃してから作り直す(収録物が減ったときに
   //    古いファイルがdistへ残らないようにするため)。
   fs.rmSync(downloadsOutDir, { recursive: true, force: true });
@@ -951,7 +1083,7 @@ function main() {
 
   // 8. web/src/generated/download_manifest.json — UIがサイズ・SHA-256・収録物
   //    を表示するための軽量な一覧(bundle実体を取得しなくても内容を説明できる
-  //    ようにする)。membersは16本のCSVのみ(meta.jsonは含めない)。
+  //    ようにする)。membersは17本のCSVのみ(meta.jsonは含めない)。
   const downloadManifest = {
     bundle: {
       file: BUNDLE_FILE_NAME,

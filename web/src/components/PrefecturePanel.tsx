@@ -8,8 +8,16 @@ import {
   formatKm2,
   formatRatio,
   formatReceipts,
+  formatReportRate,
+  formatYoyChangeRatio,
+  formatYoyRatio,
 } from '../lib/metrics';
-import type { BedFunctionKey, DemandCategoryKey, PrefectureIndicator } from '../types';
+import type {
+  BedFunctionKey,
+  DemandCategoryKey,
+  PrefectureIndicator,
+  PrefectureYoyEntry,
+} from '../types';
 
 interface PrefecturePanelProps {
   prefecture: PrefectureIndicator;
@@ -22,8 +30,13 @@ interface PrefecturePanelProps {
   demandYears: number[];
   demandYearLabels: Record<string, string>;
   demandBaselineYear: number;
+  /** prefecture_yoy.json から pref_code で引いた当該県の年度間比較データ（R6→R7）。
+   * 47都道府県すべてに存在するはずだが、型上は見つからない場合に備える。 */
+  yoyEntry: PrefectureYoyEntry | null;
   /** 「この都道府県の構想区域を見る」— 表示単位を区域へ切り替えて当該県へズームする。 */
   onDrillDown: () => void;
+  /** この都道府県の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードする（lib/downloads.ts buildPrefectureDetailCsv）。 */
+  onDownloadDetail: () => void;
 }
 
 /** 1エンティティ（都道府県 or 全国）ぶんの病床表。県と全国で同じ列・同じ整形にする。 */
@@ -76,13 +89,25 @@ export default function PrefecturePanel({
   demandYears,
   demandYearLabels,
   demandBaselineYear,
+  yoyEntry,
   onDrillDown,
+  onDownloadDetail,
 }: PrefecturePanelProps) {
   return (
     <section aria-label="都道府県の詳細">
       <h2>{prefecture.pref_name}</h2>
       <p className="area-panel-code">
-        都道府県コード: {prefecture.pref_code} ／ 構想区域 {prefecture.area_count} 区域
+        <span>
+          都道府県コード: {prefecture.pref_code} ／ 構想区域 {prefecture.area_count} 区域
+        </span>
+        <button
+          type="button"
+          className="download-button"
+          onClick={onDownloadDetail}
+          title="この都道府県の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードします"
+        >
+          この都道府県の指標をCSV
+        </button>
       </p>
 
       <BedTable entry={prefecture} functions={functions} functionLabels={functionLabels} />
@@ -167,6 +192,69 @@ export default function PrefecturePanel({
         ※ 医療需要推計と基準人口は、厚生労働省が構想区域単位でのみ公表しているものを、
         本サイトが都道府県単位で合計した派生値です（病床数は厚生労働省の都道府県別公表値そのもの）。
       </p>
+
+      {/* 年度間比較（R6→R7）。区域パネルと同じ指標・同じ列構成にしてあるので、
+          層を切り替えても読み方が変わらない。都道府県層では分母0が無いため
+          「算出不可」の行は原理的に出ない（tools/build_web_prefecture_yoy.py 検証10）。 */}
+      <h3 className="area-panel-subheading">年度間比較（R6→R7）</h3>
+      {yoyEntry ? (
+        <>
+          {/* 報告率は病床数の年間の変化に混ざりうるため、表とは別に必ず併記する
+              （区域パネルと同じ扱い）。都道府県では2024年の報告率がR6公表分と
+              R7公表分で全県一致する（相違するのは全国値のみ）。 */}
+          <ul className="meta-list">
+            <li>
+              <span>病床機能報告の報告率（2024年・R6公表）</span>
+              <span>{formatReportRate(yoyEntry.report_rate_2024)}</span>
+            </li>
+            <li>
+              <span>病床機能報告の報告率（2025年・R7公表）</span>
+              <span>{formatReportRate(yoyEntry.report_rate_2025)}</span>
+            </li>
+          </ul>
+          <div className="yoy-table-wrap">
+            <table className="yoy-table">
+              <thead>
+                <tr>
+                  <th>病床機能</th>
+                  <th>見込量2025(R6)</th>
+                  <th>実績2025(R7)</th>
+                  <th>実績2024(R6)</th>
+                  <th>見込量比（実績2025÷見込量2025）</th>
+                  <th>前年比（実績2025÷実績2024）</th>
+                </tr>
+              </thead>
+              <tbody>
+                {functions.map((fn) => {
+                  const beds = yoyEntry.beds[fn];
+                  const planRatio = computeRatio(beds.actual_2025, beds.plan_2025);
+                  const changeRatio = computeRatio(beds.actual_2025, beds.actual_2024);
+                  return (
+                    <tr key={fn}>
+                      <td>{functionLabels[fn]}</td>
+                      <td>{formatInteger(beds.plan_2025)}</td>
+                      <td>{formatInteger(beds.actual_2025)}</td>
+                      <td>{formatInteger(beds.actual_2024)}</td>
+                      <td>{formatYoyRatio(planRatio, 'yoy_plan_vs_actual')}</td>
+                      <td>{formatYoyChangeRatio(changeRatio, 'yoy_actual_change')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="population-basis-note">
+            ※ 「見込量比（実績2025÷見込量2025）」と「前年比（実績2025÷実績2024）」は別々の比較であり、
+            同じ量の2通りの見せ方ではない。見込量2025はR6公表時点の見込みで、実績2025（R7公表分）とは
+            公表回が異なる。実績2024はR6公表分だが、都道府県では R7公表分と全ての値が一致するため
+            どちらから採っても同じである（構想区域では R7公表分の2024年実績が2025年実績の複製という
+            既知の原典の欠陥があり、この点が層によって異なる）。報告率が年により異なるため（上記参照）、
+            病床数の年間の変化には報告率の変動も混ざりうる。
+          </p>
+        </>
+      ) : (
+        <p className="area-panel-placeholder">この都道府県の年度間比較データが見つかりません。</p>
+      )}
 
       <button type="button" className="drilldown-button" onClick={onDrillDown}>
         {prefecture.pref_name}の構想区域（{prefecture.area_count} 区域）を見る

@@ -15,6 +15,7 @@ function makeShard(areaCode: string, overrides: Partial<FacilityShard> = {}): Fa
     pref_name: '県',
     facility_count: 1,
     geocoded_count: 1,
+    coordinate_withdrawn_count: 0,
     facilities: [],
     ...overrides,
   };

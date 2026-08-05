@@ -110,6 +110,7 @@ FACILITY_BASIC_CSV = REPO_ROOT / "data" / "processed" / "facility_basic.csv"
 FACILITY_OBSERVATIONS_CSV = REPO_ROOT / "data" / "processed" / "facility_observations.csv"
 FACILITY_FUNCTIONS_CSV = REPO_ROOT / "data" / "processed" / "facility_functions.csv"
 FACILITY_GEO_LINKAGE_CSV = REPO_ROOT / "data" / "processed" / "facility_geo_linkage.csv"
+FACILITY_GEO_AUDIT_CSV = REPO_ROOT / "data" / "processed" / "facility_geo_audit.csv"
 AREA_BOUNDARIES_GEOJSON = REPO_ROOT / "data" / "processed" / "area_boundaries_R7.geojson"
 OUT_PATH = REPO_ROOT / "data" / "processed" / "area_facilities_R7.json"
 
@@ -117,10 +118,22 @@ FACILITY_BASIC_META_PATH = Path(str(FACILITY_BASIC_CSV) + ".meta.json")
 FACILITY_OBSERVATIONS_META_PATH = Path(str(FACILITY_OBSERVATIONS_CSV) + ".meta.json")
 FACILITY_FUNCTIONS_META_PATH = Path(str(FACILITY_FUNCTIONS_CSV) + ".meta.json")
 FACILITY_GEO_LINKAGE_META_PATH = Path(str(FACILITY_GEO_LINKAGE_CSV) + ".meta.json")
+FACILITY_GEO_AUDIT_META_PATH = Path(str(FACILITY_GEO_AUDIT_CSV) + ".meta.json")
 
 NUM_FACILITIES = 11760
 NUM_AREAS = 339
+# facility_geo_linkage.csv(P04名寄せの成果物)が座標を与えている件数。
 EXPECTED_GEOCODED_COUNT = 10244
+# うち、医療情報ネットの公表座標との検算(facility_geo_audit.csv)で
+# 1km以上離れていた件数。**この施設の座標は画面に出さない**(下記
+# AUDIT_STATUS_CONFLICT の扱い、doc/FACILITY_GEO_AUDIT.md参照)。
+EXPECTED_COORDINATE_WITHDRAWN_COUNT = 76
+# 実際に地図へ出す座標の件数。
+EXPECTED_DISPLAYED_COORDINATE_COUNT = EXPECTED_GEOCODED_COUNT - EXPECTED_COORDINATE_WITHDRAWN_COUNT
+
+# facility_geo_audit.csvのaudit_status。付与済み座標と参照座標が離れすぎて
+# いる(=2つの公表物が別の位置を示している)ことを表す値。
+AUDIT_STATUS_CONFLICT = "conflict"
 
 # 日本の陸域を大きく包含する範囲(検証9)。与那国島(東経約122.9度)から
 # 南鳥島(東経約153.98度)、沖ノ鳥島(北緯約20.4度)から択捉島(北緯約45.5度)
@@ -226,7 +239,16 @@ FIELD_DESCRIPTIONS = {
     "pref_code": "都道府県コード(ゼロ埋め2桁の文字列)",
     "pref_name": "都道府県名",
     "facility_count": "この区域に属する医療機関数(facility_basic.csvの行数)",
-    "geocoded_count": "この区域内でcoordinatesを持つ(match_status=='matched')医療機関数",
+    "geocoded_count": (
+        "この区域内で実際にcoordinatesを持つ(=地図に点として出る)医療機関数。"
+        "match_status=='matched'であっても、検算で座標を取り下げた施設"
+        "(coordinate_withdrawnがtrue)はここに数えない"
+    ),
+    "coordinate_withdrawn_count": (
+        "この区域内で、P04名寄せでは座標が付いたが検算(facility_geo_audit.csv)で"
+        "取り下げた医療機関数。facility_count = 地図に出る数(geocoded_count) + "
+        "座標が無い数 + この数、という関係になる"
+    ),
     "facilities": "この区域内の医療機関の配列。原典の並び順(facility_basic.csvのsource_row昇順=病床数降順)を保つ",
     "facilities[].record_id": (
         "facility_basic.csvのrecord_idと同一。恒久的な施設IDではない点に留意"
@@ -255,8 +277,15 @@ FIELD_DESCRIPTIONS = {
         "信頼できる候補が絞れない(座標なし)。詳細はdoc/FACILITY_LINKAGE.md参照"
     ),
     "facilities[].coordinates": (
-        "[経度, 緯度](度、JGD2011)。match_status=='matched'の施設のみ存在する"
-        "(位置の推測はしない方針、doc/REQUIREMENTS.md §4.3参照)。座標は丸めない"
+        "[経度, 緯度](度、JGD2011)。match_status=='matched'かつ検算で取り下げていない"
+        "施設のみ存在する(位置の推測はしない方針、doc/REQUIREMENTS.md §4.3参照)。座標は丸めない"
+    ),
+    "facilities[].coordinate_withdrawn": (
+        "trueの場合、P04名寄せでは座標が付いた(match_status=='matched')が、"
+        "医療情報ネットの公表座標との検算で1km以上離れていた(facility_geo_audit.csvの"
+        "audit_status=='conflict')ため、**この可視化サイトでは座標を出さない**ことを表す。"
+        "該当しない施設ではこのキー自体を省略する。値を補正した(参照側の座標を採用した)のでは"
+        "ない点に注意(doc/FACILITY_GEO_AUDIT.md・doc/DECISION_FACILITY_COORDINATES.md参照)"
     ),
 }
 
@@ -285,7 +314,7 @@ def _to_number(raw: str):
     return value
 
 
-def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, geo_codes):
+def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, audit_rows, geo_codes):
     """検証1〜11を行い、違反があれば SystemExit で中断する。
 
     戻り値: (basic_id_set, obs_index, geo_index, functions_index)
@@ -469,6 +498,29 @@ def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, ge
             f"検証9失敗: 座標付き施設が{EXPECTED_GEOCODED_COUNT}件ちょうどではありません(実際{coord_count}件)"
         )
 
+    # 検証14: facility_geo_audit.csv(医療情報ネットの公表座標との検算)
+    # 座標を取り下げる対象を確定する。取り下げは「値の補正」ではなく
+    # 「検算で否定された座標を画面に出さない」措置(doc/FACILITY_GEO_AUDIT.md)。
+    audit_ids = {r["record_id"] for r in audit_rows}
+    if audit_ids != set(geo_index):
+        raise SystemExit(
+            "検証14失敗: facility_geo_audit.csvのrecord_id集合がfacility_geo_linkage.csvと"
+            f"一致しません(audit={len(audit_ids)} linkage={len(geo_index)})"
+        )
+    withdrawn = {r["record_id"] for r in audit_rows if r["audit_status"] == AUDIT_STATUS_CONFLICT}
+    if len(withdrawn) != EXPECTED_COORDINATE_WITHDRAWN_COUNT:
+        raise SystemExit(
+            f"検証14失敗: audit_status=='{AUDIT_STATUS_CONFLICT}'が"
+            f"{EXPECTED_COORDINATE_WITHDRAWN_COUNT}件ちょうどではありません(実際{len(withdrawn)}件)。"
+            "監査の入力が変わった場合はEXPECTED_COORDINATE_WITHDRAWN_COUNTを更新すること"
+        )
+    without_coordinate = sorted(rid for rid in withdrawn if geo_index[rid][1] is None)
+    if without_coordinate:
+        raise SystemExit(
+            "検証14失敗: 座標を持たない施設がconflictとして報告されています"
+            f"(検算は座標がある施設にのみ成立するはずです): {without_coordinate[:10]}"
+        )
+
     # 検証10: facility_functions.csvのrecord_idがfacility_basic.csvの部分集合
     functions_index = {}
     for r in function_rows:
@@ -477,12 +529,16 @@ def validate_and_index(basic_rows, observation_rows, function_rows, geo_rows, ge
             raise SystemExit(f"検証10失敗: facility_functions.csvにfacility_basic.csvに無いrecord_idがあります: {rid!r}")
         functions_index.setdefault(rid, []).append(r["function_name"])
 
-    return basic_id_set, obs_index, geo_index, functions_index
+    return basic_id_set, obs_index, geo_index, functions_index, withdrawn
 
 
-def build_areas(basic_rows, obs_index, geo_index, functions_index):
+def build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn):
     """facility_basic.csvの行をarea_codeごとにまとめ、検証12を満たす
     areas配列を組み立てる(area_code昇順、facilitiesはsource_row昇順)。
+
+    `withdrawn`は検算(facility_geo_audit.csv)で座標を取り下げたrecord_idの集合。
+    該当施設は`coordinates`を出力せず`coordinate_withdrawn`をtrueにする
+    (一覧からは消さない。全21指標はそのまま出す)。
     """
     by_area = {}
     for r in basic_rows:
@@ -495,6 +551,7 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index):
 
         facilities = []
         geocoded_count = 0
+        withdrawn_count = 0
         for r in rows:
             rid = r["record_id"]
             record_map = obs_index[rid]
@@ -519,7 +576,12 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index):
 
             match_status, coordinates = geo_index[rid]
             facility["match_status"] = match_status
-            if coordinates is not None:
+            if rid in withdrawn:
+                # 検算で否定された座標は出さない。match_statusは名寄せの結果
+                # そのままにする(facility_geo_linkage.csvと食い違わせない)。
+                facility["coordinate_withdrawn"] = True
+                withdrawn_count += 1
+            elif coordinates is not None:
                 facility["coordinates"] = coordinates
                 geocoded_count += 1
 
@@ -533,6 +595,7 @@ def build_areas(basic_rows, obs_index, geo_index, functions_index):
                 "pref_name": first["pref_name"],
                 "facility_count": len(facilities),
                 "geocoded_count": geocoded_count,
+                "coordinate_withdrawn_count": withdrawn_count,
                 "facilities": facilities,
             }
         )
@@ -563,7 +626,7 @@ def validate_areas_output(areas, basic_id_set) -> None:
         )
 
 
-def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, inputs) -> dict:
+def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, audit_meta, inputs) -> dict:
     basic_source = _select(basic_meta["source"], SOURCE_KEYS)
     observations_source = _select(observations_meta["source"], SOURCE_KEYS)
     functions_source = _select(functions_meta["source"], SOURCE_KEYS)
@@ -611,16 +674,19 @@ def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, inpu
         "facility_observations": observations_meta["processing"]["caveat"],
         "facility_functions": functions_meta["processing"]["caveat"],
         "facility_geo_linkage": geo_meta["processing"]["caveat"],
+        "facility_geo_audit": audit_meta["processing"]["caveat"],
     }
 
     # 原典側の既知の欠陥は入力CSVのmeta.jsonから拾って集約する(この場で
     # 新規に定義しない)。現状はfacility_basic.csvの
-    # facility_basic_summary_hospital_count_mismatch 1件のみ。
+    # facility_basic_summary_hospital_count_mismatch と、facility_geo_audit.csvの
+    # facility_coordinate_conflicts_with_published_reference の2件。
     known_issues = (
         list(basic_meta.get("known_issues", []))
         + list(observations_meta.get("known_issues", []))
         + list(functions_meta.get("known_issues", []))
         + list(geo_meta.get("known_issues", []))
+        + list(audit_meta.get("known_issues", []))
     )
 
     return {
@@ -661,6 +727,11 @@ def build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, inpu
                 "出力の全施設についてvalues/value_statusの長さがちょうど21であることを確認(検証12)",
                 "areas[].facilitiesの総数が11,760件ちょうどで、record_idが区域をまたいで"
                 "重複せず、facility_basic.csvのrecord_id集合と完全一致することを確認(検証13)",
+                "facility_geo_audit.csv(医療情報ネットの公表座標との検算)のrecord_id集合が"
+                "facility_geo_linkage.csvと一致し、audit_status=='conflict'が76件ちょうどで、"
+                "その全件が座標を持つ施設であることを確認(検証14)",
+                "audit_status=='conflict'の76件はcoordinatesを出力せずcoordinate_withdrawn=trueに"
+                "する(一覧・21指標はそのまま出す)。地図に出る座標は10,168件になる",
             ],
             "caveat": caveat,
         },
@@ -704,31 +775,40 @@ def build_and_write(out_path: Path) -> Path:
     observation_rows = _load_csv_rows(FACILITY_OBSERVATIONS_CSV)
     function_rows = _load_csv_rows(FACILITY_FUNCTIONS_CSV)
     geo_rows = _load_csv_rows(FACILITY_GEO_LINKAGE_CSV)
+    audit_rows = _load_csv_rows(FACILITY_GEO_AUDIT_CSV)
     geo_codes = _load_geojson_area_codes(AREA_BOUNDARIES_GEOJSON)
     print(
         f"[ok] 入力読み込み: facility_basic.csv={len(basic_rows)}行 "
         f"facility_observations.csv={len(observation_rows)}行 "
         f"facility_functions.csv={len(function_rows)}行 "
         f"facility_geo_linkage.csv={len(geo_rows)}行 "
+        f"facility_geo_audit.csv={len(audit_rows)}行 "
         f"area_boundaries_R7.geojson={len(geo_codes)}区域"
     )
 
-    basic_id_set, obs_index, geo_index, functions_index = validate_and_index(
-        basic_rows, observation_rows, function_rows, geo_rows, geo_codes
+    basic_id_set, obs_index, geo_index, functions_index, withdrawn = validate_and_index(
+        basic_rows, observation_rows, function_rows, geo_rows, audit_rows, geo_codes
     )
     print(
-        "[ok] 検証1〜11: published_fy・record_id一意性(11760)・record_id集合一致・"
+        "[ok] 検証1〜11・14: published_fy・record_id一意性(11760)・record_id集合一致・"
         "area_code集合一致(339)・区域内一貫性・21指標の過不足なし・metric/bed_function既知性・"
-        "value_status既知性・value整合・座標整合(10244件)・facility_functions部分集合を確認"
+        "value_status既知性・value整合・座標整合(10244件)・facility_functions部分集合・"
+        f"検算で取り下げる座標({len(withdrawn)}件)を確認"
     )
 
-    areas = build_areas(basic_rows, obs_index, geo_index, functions_index)
+    areas = build_areas(basic_rows, obs_index, geo_index, functions_index, withdrawn)
     validate_areas_output(areas, basic_id_set)
     total_facilities = sum(a["facility_count"] for a in areas)
     total_geocoded = sum(a["geocoded_count"] for a in areas)
+    total_withdrawn = sum(a["coordinate_withdrawn_count"] for a in areas)
+    if total_geocoded != EXPECTED_DISPLAYED_COORDINATE_COUNT:
+        raise SystemExit(
+            f"検証14失敗: 地図に出す座標が{EXPECTED_DISPLAYED_COORDINATE_COUNT}件ちょうどでは"
+            f"ありません(実際{total_geocoded}件)"
+        )
     print(
-        f"[ok] areas構築+検証12〜13: {len(areas)}区域 施設計{total_facilities}件"
-        f"(座標あり{total_geocoded}件)"
+        f"[ok] areas構築+検証12〜14: {len(areas)}区域 施設計{total_facilities}件"
+        f"(地図に出す座標{total_geocoded}件 / 検算で取り下げ{total_withdrawn}件)"
     )
 
     with open(FACILITY_BASIC_META_PATH, "r", encoding="utf-8") as f:
@@ -739,15 +819,20 @@ def build_and_write(out_path: Path) -> Path:
         functions_meta = json.load(f)
     with open(FACILITY_GEO_LINKAGE_META_PATH, "r", encoding="utf-8") as f:
         geo_meta = json.load(f)
+    with open(FACILITY_GEO_AUDIT_META_PATH, "r", encoding="utf-8") as f:
+        audit_meta = json.load(f)
 
     inputs = [
         {"path": "data/processed/facility_basic.csv", "sha256": sha256(FACILITY_BASIC_CSV)},
         {"path": "data/processed/facility_observations.csv", "sha256": sha256(FACILITY_OBSERVATIONS_CSV)},
         {"path": "data/processed/facility_functions.csv", "sha256": sha256(FACILITY_FUNCTIONS_CSV)},
         {"path": "data/processed/facility_geo_linkage.csv", "sha256": sha256(FACILITY_GEO_LINKAGE_CSV)},
+        {"path": "data/processed/facility_geo_audit.csv", "sha256": sha256(FACILITY_GEO_AUDIT_CSV)},
         {"path": "data/processed/area_boundaries_R7.geojson", "sha256": sha256(AREA_BOUNDARIES_GEOJSON)},
     ]
-    metadata = build_metadata(basic_meta, observations_meta, functions_meta, geo_meta, inputs)
+    metadata = build_metadata(
+        basic_meta, observations_meta, functions_meta, geo_meta, audit_meta, inputs
+    )
 
     output = {
         "metadata": metadata,

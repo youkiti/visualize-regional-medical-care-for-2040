@@ -23,8 +23,12 @@ interface ControlsProps {
   areas: AreaIndicator[];
   onSelectArea: (areaCode: string) => void;
   onResetView: () => void;
-  /** 今の指標・病床機能・年度のまま、全339区域ぶんをCSVでダウンロードする（lib/downloads.ts buildAreaTableCsv）。 */
-  onDownloadAreaTable: () => void;
+  /**
+   * 今の指標・病床機能・年度のまま、地図に出ている表示単位ぶんをCSVでダウンロードする。
+   * level='pref' なら47都道府県（lib/downloads.ts buildPrefectureTableCsv）、
+   * level='area' なら339構想区域（同 buildAreaTableCsv）。
+   */
+  onDownloadTable: () => void;
   /** area_demand.json の years/year_labels（西暦の配列と、年の文字列 -> 年度ラベル原文）。 */
   years: number[];
   yearLabels: Record<string, string>;
@@ -70,7 +74,7 @@ export default function Controls({
   areas,
   onSelectArea,
   onResetView,
-  onDownloadAreaTable,
+  onDownloadTable,
   years,
   yearLabels,
   yearIndex,
@@ -174,18 +178,18 @@ export default function Controls({
         <button type="button" onClick={onResetView}>
           全国表示に戻す
         </button>
-        {/* CSVは常に339構想区域ぶんを出す（都道府県ぶんのCSVはまだ無い）。
-            表示単位が都道府県のときにラベルを変えないと、出てくる中身と食い違う。 */}
+        {/* CSVの中身は表示単位に追随する（都道府県=47件／構想区域=339件）。
+            件数をラベルに出しておかないと、開くまで何件出るのか分からない。 */}
         <button
           type="button"
-          onClick={onDownloadAreaTable}
+          onClick={onDownloadTable}
           title={
             level === 'pref'
-              ? '現在の病床機能・指標・年度のまま、全339構想区域ぶんをCSVでダウンロードします（都道府県ぶんの集計CSVは未対応）'
+              ? '地図に表示中の指標（現在の病床機能・指標・年度）を、全47都道府県ぶんCSVでダウンロードします（全国は含みません）'
               : '地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします'
           }
         >
-          {level === 'pref' ? '構想区域のデータをCSV' : '表示中のデータをCSV'}
+          {level === 'pref' ? '表示中のデータをCSV（47都道府県）' : '表示中のデータをCSV（339区域）'}
         </button>
       </div>
     </div>

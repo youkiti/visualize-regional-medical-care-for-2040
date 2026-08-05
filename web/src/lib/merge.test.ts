@@ -505,6 +505,33 @@ function makePrefectureIndicators(prefectures: Array<Record<string, unknown>>) {
   };
 }
 
+/** prefecture_yoy_R6_R7.json の1エントリ相当（全国は national にいるのでここには含めない）。 */
+function makePrefectureYoyEntry(pref_code: string, overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    pref_code,
+    pref_name: `Pref ${pref_code}`,
+    report_rate_2024: 0.95,
+    report_rate_2025: 0.98,
+    beds: {
+      // actual_2025 は makePrefecture() の beds と一致させる必要がある
+      // （buildPrefectureMap が2データセットの突合を検証するため）
+      total: { plan_2025: 900, actual_2025: 1000, actual_2024: 950 },
+      high_acute: { plan_2025: 0, actual_2025: 100, actual_2024: 0 },
+      acute: { plan_2025: 380, actual_2025: 400, actual_2024: 390 },
+      recovery: { plan_2025: 320, actual_2025: 300, actual_2024: 310 },
+      chronic: { plan_2025: 200, actual_2025: 200, actual_2024: 250 },
+    },
+    ...overrides,
+  };
+}
+
+function makePrefectureYoy(prefectures: Array<Record<string, unknown>>) {
+  return {
+    functions: ['total', 'high_acute', 'acute', 'recovery', 'chronic'],
+    prefectures,
+  };
+}
+
 function makePrefFeature(pref_code: string) {
   return {
     type: 'Feature',
@@ -532,7 +559,8 @@ describe('buildPrefectureMap', () => {
   it('emits the same flat bed property names as buildAreaMap', () => {
     const out = buildPrefectureMap(
       { features: [makePrefFeature('01')] },
-      makePrefectureIndicators([makePrefecture('01')])
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
     );
     const props = out.features[0].properties;
 
@@ -550,7 +578,8 @@ describe('buildPrefectureMap', () => {
   it('omits r_<fn> when need_2025 is 0 (same rule as buildAreaMap)', () => {
     const out = buildPrefectureMap(
       { features: [makePrefFeature('01')] },
-      makePrefectureIndicators([makePrefecture('01')])
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
     );
     const props = out.features[0].properties;
     expect(props.a_high_acute).toBe(100);
@@ -561,7 +590,8 @@ describe('buildPrefectureMap', () => {
   it('emits demand value/ratio keys under the shared key functions', () => {
     const out = buildPrefectureMap(
       { features: [makePrefFeature('01')] },
-      makePrefectureIndicators([makePrefecture('01')])
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
     );
     const props = out.features[0].properties;
 
@@ -576,16 +606,81 @@ describe('buildPrefectureMap', () => {
   it('attaches the feature bbox', () => {
     const out = buildPrefectureMap(
       { features: [makePrefFeature('01')] },
-      makePrefectureIndicators([makePrefecture('01')])
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
     );
     const props = out.features[0].properties;
     expect([props.bb_w, props.bb_s, props.bb_e, props.bb_n]).toEqual([130, 30, 131, 31]);
   });
 
+  // YoY (R6→R7)。区域層と同じキー関数・同じ省略規約であることを固定する
+  // （層で食い違うと、地図が片方でだけ静かに無色になる。罠10と同型）。
+  it('emits the same flat yoy property names as buildAreaMap', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
+    );
+    const props = out.features[0].properties;
+
+    expect(props[mjsYoyPlanValueKey('total')]).toBe(900);
+    expect(props[mjsYoyActual2024Key('total')]).toBe(950);
+    expect(props[mjsYoyPlanRatioKey('total')]).toBeCloseTo(1000 / 900);
+    expect(props[mjsYoyChangeRatioKey('total')]).toBeCloseTo(1000 / 950);
+    // metrics.ts(読み側)のキー関数でも同じ値が引けること
+    expect(props[tsYoyPlanRatioKey('acute')]).toBeCloseTo(400 / 380);
+    expect(props[tsYoyChangeRatioKey('acute')]).toBeCloseTo(400 / 390);
+  });
+
+  it('omits the yoy ratio keys when their denominator is 0 (same rule as buildAreaMap)', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01')])
+    );
+    const props = out.features[0].properties;
+    // high_acute は plan_2025/actual_2024 とも0のフィクスチャ
+    expect(props[mjsYoyPlanValueKey('high_acute')]).toBe(0);
+    expect(mjsYoyPlanRatioKey('high_acute') in props).toBe(false);
+    expect(mjsYoyChangeRatioKey('high_acute') in props).toBe(false);
+  });
+
+  it('throws when the yoy pref_code set differs from the boundaries', () => {
+    expect(() =>
+      buildPrefectureMap(
+        { features: [makePrefFeature('01')] },
+        makePrefectureIndicators([makePrefecture('01')]),
+        makePrefectureYoy([makePrefectureYoyEntry('02')])
+      )
+    ).toThrow(/pref_code sets differ between boundaries and yoy/);
+  });
+
+  it('throws when actual_2025 disagrees between the indicators and yoy datasets', () => {
+    // ツールチップは分子を指標側(a_<fn>)・分母を年度間比較側から読むので、
+    // 2データセットの実績2025がずれると表示が静かに食い違う。
+    const drifted = makePrefectureYoyEntry('01', {
+      beds: {
+        total: { plan_2025: 900, actual_2025: 9999, actual_2024: 950 },
+        high_acute: { plan_2025: 0, actual_2025: 100, actual_2024: 0 },
+        acute: { plan_2025: 380, actual_2025: 400, actual_2024: 390 },
+        recovery: { plan_2025: 320, actual_2025: 300, actual_2024: 310 },
+        chronic: { plan_2025: 200, actual_2025: 200, actual_2024: 250 },
+      },
+    });
+    expect(() =>
+      buildPrefectureMap(
+        { features: [makePrefFeature('01')] },
+        makePrefectureIndicators([makePrefecture('01')]),
+        makePrefectureYoy([drifted])
+      )
+    ).toThrow(/actual_2025 differs between indicators and yoy/);
+  });
+
   it('preserves the boundary feature order', () => {
     const out = buildPrefectureMap(
       { features: [makePrefFeature('02'), makePrefFeature('01')] },
-      makePrefectureIndicators([makePrefecture('01'), makePrefecture('02')])
+      makePrefectureIndicators([makePrefecture('01'), makePrefecture('02')]),
+      makePrefectureYoy([makePrefectureYoyEntry('01'), makePrefectureYoyEntry('02')])
     );
     expect(out.features.map((f) => f.properties.pref_code)).toEqual(['02', '01']);
   });
@@ -594,7 +689,8 @@ describe('buildPrefectureMap', () => {
     expect(() =>
       buildPrefectureMap(
         { features: [makePrefFeature('01'), makePrefFeature('02')] },
-        makePrefectureIndicators([makePrefecture('01')])
+        makePrefectureIndicators([makePrefecture('01')]),
+        makePrefectureYoy([makePrefectureYoyEntry('01')])
       )
     ).toThrow(/pref_code sets differ/);
   });
@@ -607,7 +703,11 @@ describe('buildPrefectureMap', () => {
       },
     });
     expect(() =>
-      buildPrefectureMap({ features: [makePrefFeature('01')] }, makePrefectureIndicators([broken]))
+      buildPrefectureMap(
+        { features: [makePrefFeature('01')] },
+        makePrefectureIndicators([broken]),
+        makePrefectureYoy([makePrefectureYoyEntry('01')])
+      )
     ).toThrow(/demand\.home_care\[2040\]/);
   });
 
@@ -622,7 +722,11 @@ describe('buildPrefectureMap', () => {
       },
     });
     expect(() =>
-      buildPrefectureMap({ features: [makePrefFeature('01')] }, makePrefectureIndicators([broken]))
+      buildPrefectureMap(
+        { features: [makePrefFeature('01')] },
+        makePrefectureIndicators([broken]),
+        makePrefectureYoy([makePrefectureYoyEntry('01')])
+      )
     ).toThrow(/beds\.chronic/);
   });
 });
