@@ -181,6 +181,111 @@ export function buildAreaMap(boundaries, indicators, demand) {
 }
 
 /**
+ * Merge the 47-feature prefecture boundary FeatureCollection with
+ * prefecture_indicators_R7.json into a flat-properties FeatureCollection ready
+ * for MapLibre (pref_map.json) — the overview layer's counterpart to
+ * buildAreaMap above.
+ *
+ * Deliberately a separate function rather than a generalization of
+ * buildAreaMap: the prefecture dataset carries beds AND demand in one object
+ * keyed by pref_code (build_web_prefecture.py), whereas the area side merges
+ * two separately-keyed datasets. The flat property names are the same on both
+ * (a_/n_/r_<fn>, demandValueKey/demandRatioKey), so web/src/lib/metrics.ts can
+ * read either layer's features with the same helpers.
+ *
+ * @param {{features: Array<{properties: Record<string, unknown>, geometry: unknown}>}} boundaries
+ * @param {{categories: string[], years: number[], baseline_year: number, prefectures: Array<Record<string, unknown>>}} indicators
+ * @returns {{
+ *   type: 'FeatureCollection',
+ *   features: Array<{type: 'Feature', properties: Record<string, string | number>, geometry: unknown}>
+ * }}
+ */
+export function buildPrefectureMap(boundaries, indicators) {
+  const boundaryCodes = boundaries.features.map((f) => f.properties.pref_code);
+  const boundaryCodeSet = new Set(boundaryCodes);
+  const indicatorCodeSet = new Set(indicators.prefectures.map((p) => p.pref_code));
+
+  const missingInIndicators = [...boundaryCodeSet].filter((c) => !indicatorCodeSet.has(c));
+  const missingInBoundaries = [...indicatorCodeSet].filter((c) => !boundaryCodeSet.has(c));
+  if (missingInIndicators.length > 0 || missingInBoundaries.length > 0) {
+    throw new Error(
+      'buildPrefectureMap: pref_code sets differ between boundaries and indicators. ' +
+        `missing_in_indicators=${JSON.stringify(missingInIndicators)} ` +
+        `missing_in_boundaries=${JSON.stringify(missingInBoundaries)}`
+    );
+  }
+
+  const indicatorByCode = new Map(indicators.prefectures.map((p) => [p.pref_code, p]));
+
+  const features = boundaries.features.map((feature) => {
+    const pref = indicatorByCode.get(feature.properties.pref_code);
+
+    /** @type {Record<string, string | number>} */
+    const props = {
+      pref_code: feature.properties.pref_code,
+      pref_name: feature.properties.pref_name,
+      boundary_source: feature.properties.boundary_source,
+    };
+
+    for (const fn of BED_FUNCTIONS) {
+      const beds = pref.beds[fn];
+      if (!beds || typeof beds.actual_2025 !== 'number' || typeof beds.need_2025 !== 'number') {
+        throw new Error(`buildPrefectureMap: beds.${fn} missing/non-numeric for prefecture ${pref.pref_code}`);
+      }
+      props[`a_${fn}`] = beds.actual_2025;
+      props[`n_${fn}`] = beds.need_2025;
+      // Same omit-when-need-is-zero rule as buildAreaMap: no prefecture
+      // actually has need_2025 === 0 (tools/build_web_prefecture.py 検証13
+      // logs the count, observed 0), but the map/legend code path for
+      // "算出不可" is shared with the area layer, so don't diverge here.
+      if (beds.need_2025 !== 0) {
+        props[`r_${fn}`] = beds.actual_2025 / beds.need_2025;
+      }
+    }
+
+    for (const category of indicators.categories) {
+      const categoryDemand = pref.demand ? pref.demand[category] : undefined;
+      if (!categoryDemand || typeof categoryDemand !== 'object') {
+        throw new Error(`buildPrefectureMap: demand.${category} missing for prefecture ${pref.pref_code}`);
+      }
+      const baseline = categoryDemand[String(indicators.baseline_year)];
+      if (typeof baseline !== 'number' || !Number.isFinite(baseline)) {
+        throw new Error(
+          `buildPrefectureMap: demand.${category}[${indicators.baseline_year}] missing/non-numeric for prefecture ${pref.pref_code}`
+        );
+      }
+      for (const year of indicators.years) {
+        const value = categoryDemand[String(year)];
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+          throw new Error(
+            `buildPrefectureMap: demand.${category}[${year}] missing/non-numeric for prefecture ${pref.pref_code}`
+          );
+        }
+        props[demandValueKey(category, year)] = value;
+        props[demandRatioKey(category, year)] = value / baseline;
+      }
+    }
+
+    const [w, s, e, n] = computeBBox(feature.geometry);
+    props.bb_w = w;
+    props.bb_s = s;
+    props.bb_e = e;
+    props.bb_n = n;
+
+    return {
+      type: 'Feature',
+      properties: props,
+      geometry: feature.geometry,
+    };
+  });
+
+  return {
+    type: 'FeatureCollection',
+    features,
+  };
+}
+
+/**
  * Build the lightweight per-area index (area_index.json) used by App to
  * resolve a bbox/boundary_source for a given area_code without depending on
  * the map's current load/viewport state (see web/src/App.tsx selectArea
