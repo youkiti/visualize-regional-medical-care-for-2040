@@ -32,6 +32,7 @@ function makeArea(area_code: string, overrides: Partial<Record<string, unknown>>
     pref_name: 'Pref',
     facility_count: 1,
     geocoded_count: 1,
+    coordinate_withdrawn_count: 0,
     facilities: [makeFacility()],
     ...overrides,
   };
@@ -58,6 +59,7 @@ describe('buildAreaShard', () => {
       pref_name: 'Pref',
       facility_count: 1,
       geocoded_count: 1,
+      coordinate_withdrawn_count: 0,
       facilities: area.facilities,
     });
     // Same object reference (not re-parsed/re-sliced), per the brief:
@@ -82,11 +84,15 @@ describe('buildFacilitySummary', () => {
     }
   });
 
-  it('keeps only area_code/facility_count/geocoded_count per area', () => {
-    const data = makeFacilitiesData([makeArea('0101', { facility_count: 5, geocoded_count: 3 })]);
+  it('keeps only area_code/facility_count/geocoded_count/coordinate_withdrawn_count per area', () => {
+    const data = makeFacilitiesData([
+      makeArea('0101', { facility_count: 5, geocoded_count: 3, coordinate_withdrawn_count: 1 }),
+    ]);
     const summary = buildFacilitySummary(data);
 
-    expect(summary.areas).toEqual([{ area_code: '0101', facility_count: 5, geocoded_count: 3 }]);
+    expect(summary.areas).toEqual([
+      { area_code: '0101', facility_count: 5, geocoded_count: 3, coordinate_withdrawn_count: 1 },
+    ]);
   });
 
   it('preserves metadata, metrics and value_status_labels', () => {

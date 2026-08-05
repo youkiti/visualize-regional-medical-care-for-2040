@@ -98,6 +98,17 @@ function FacilityDetail({
   );
 }
 
+/**
+ * 「地図に出ていない分」の内訳を1行の日本語にする。0件の理由は書かない
+ * （「座標が不一致 0件」のような、その区域には存在しない理由を出さないため）。
+ */
+export function coverageBreakdown(coverage: { unmatched: number; withdrawn: number }): string {
+  const parts: string[] = [];
+  if (coverage.unmatched > 0) parts.push(`名寄せで位置を特定できず ${coverage.unmatched}件`);
+  if (coverage.withdrawn > 0) parts.push(`座標が不一致 ${coverage.withdrawn}件`);
+  return parts.join('、');
+}
+
 export default function FacilityList({
   facilityCount,
   status,
@@ -126,10 +137,25 @@ export default function FacilityList({
     [facilities, valueStatusLabels]
   );
 
-  const hasUnmappedFacility = useMemo(
-    () => (facilities ?? []).some((f) => f.match_status !== 'matched'),
-    [facilities]
-  );
+  // 地図に出ない施設は2種類あり、理由が違うので分けて数える:
+  // (a) 名寄せで位置を一意に特定できなかった（座標を与えていない）
+  // (b) 名寄せでは座標が付いたが、別の公表物との検算で1km以上離れていたため
+  //     この可視化サイトでは座標を出さない（coordinate_withdrawn。
+  //     doc/FACILITY_GEO_AUDIT.md）
+  // **座標の有無は match_status ではなく coordinates の有無で判定する**
+  // （(b)は match_status==='matched' のまま座標を持たない）。
+  const coverage = useMemo(() => {
+    const list = facilities ?? [];
+    let mapped = 0;
+    let unmatched = 0;
+    let withdrawn = 0;
+    for (const f of list) {
+      if (f.coordinates) mapped += 1;
+      else if (f.coordinate_withdrawn) withdrawn += 1;
+      else unmatched += 1;
+    }
+    return { mapped, unmatched, withdrawn, total: list.length };
+  }, [facilities]);
 
   // 「一覧をCSV」は取得済み(status==='loaded')かつ1件以上のときだけ活性にする
   // （brief記載どおり）。非活性の理由はtitleで説明する。
@@ -216,9 +242,22 @@ export default function FacilityList({
                                 {fn}
                               </span>
                             ))}
-                            {facility.match_status !== 'matched' && (
-                              <span className="facility-badge-unmapped">地図に表示なし</span>
-                            )}
+                            {!facility.coordinates &&
+                              (facility.coordinate_withdrawn ? (
+                                <span
+                                  className="facility-badge-unmapped"
+                                  title="別の公表物（医療情報ネットの公表座標）との検算で1km以上離れていたため、この可視化サイトでは座標を表示していません"
+                                >
+                                  地図に表示なし（座標が不一致）
+                                </span>
+                              ) : (
+                                <span
+                                  className="facility-badge-unmapped"
+                                  title="名寄せで位置を一意に特定できなかったため座標を与えていません（位置の推測はしません）"
+                                >
+                                  地図に表示なし
+                                </span>
+                              ))}
                           </div>
                         </td>
                         {summaryIndices.map((idx, col) => (
@@ -252,9 +291,21 @@ export default function FacilityList({
               凡例：{legendStatuses.map((s) => valueStatusLabels[s]).join('／')}
             </p>
           )}
-          {hasUnmappedFacility && (
+          {/* 座標カバレッジ。点の数を施設数と読み違えさせないため、
+              「地図に出ているのは全体のうち何件か」を常に明示する。 */}
+          <p className="facility-coverage-note">
+            地図に表示：<strong>{coverage.mapped}件</strong> / この区域の{coverage.total}件
+            {coverage.mapped < coverage.total && `（${coverageBreakdown(coverage)}）`}
+          </p>
+          {coverage.unmatched > 0 && (
             <p className="facility-legend-note">
               「地図に表示なし」＝名寄せで位置を一意に特定できなかったため座標を与えていない医療機関です（位置の推測はしません）。
+            </p>
+          )}
+          {coverage.withdrawn > 0 && (
+            <p className="facility-legend-note">
+              「地図に表示なし（座標が不一致）」＝名寄せでは座標が付いたものの、別の公表物（医療情報ネットの公表座標）との
+              検算で1km以上離れていたため、座標を表示していない医療機関です（値の補正はせず、表示を控えています）。
             </p>
           )}
         </>

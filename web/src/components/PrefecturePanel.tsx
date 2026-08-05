@@ -24,6 +24,8 @@ interface PrefecturePanelProps {
   demandBaselineYear: number;
   /** 「この都道府県の構想区域を見る」— 表示単位を区域へ切り替えて当該県へズームする。 */
   onDrillDown: () => void;
+  /** この都道府県の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードする（lib/downloads.ts buildPrefectureDetailCsv）。 */
+  onDownloadDetail: () => void;
 }
 
 /** 1エンティティ（都道府県 or 全国）ぶんの病床表。県と全国で同じ列・同じ整形にする。 */
@@ -77,12 +79,23 @@ export default function PrefecturePanel({
   demandYearLabels,
   demandBaselineYear,
   onDrillDown,
+  onDownloadDetail,
 }: PrefecturePanelProps) {
   return (
     <section aria-label="都道府県の詳細">
       <h2>{prefecture.pref_name}</h2>
       <p className="area-panel-code">
-        都道府県コード: {prefecture.pref_code} ／ 構想区域 {prefecture.area_count} 区域
+        <span>
+          都道府県コード: {prefecture.pref_code} ／ 構想区域 {prefecture.area_count} 区域
+        </span>
+        <button
+          type="button"
+          className="download-button"
+          onClick={onDownloadDetail}
+          title="この都道府県の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードします"
+        >
+          この都道府県の指標をCSV
+        </button>
       </p>
 
       <BedTable entry={prefecture} functions={functions} functionLabels={functionLabels} />

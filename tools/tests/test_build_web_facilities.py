@@ -5,8 +5,9 @@
 metadataは可読)、スキーマの健全性(339区域・11,760施設・全施設で
 len(values)==len(value_status)==21)、変換の忠実性(facility_observations.csvの
 246,960行全件と出力の値が一致すること。サンプリングではなく全件)、座標
-(10,244件・match_statusとの整合)、metadataの出典・生成日時不在・known_issuesの
-入力CSV由来を検証する。
+(名寄せの10,244件のうち、検算で否定された76件を除いた10,168件が出力され、
+match_statusとの関係が「matchedでも座標を持つとは限らない」形になっていること)、
+metadataの出典・生成日時不在・known_issuesの入力CSV由来を検証する。
 """
 import csv
 import json
@@ -14,8 +15,11 @@ import json
 import pytest
 
 from tools.build_web_facilities import (
+    EXPECTED_COORDINATE_WITHDRAWN_COUNT,
+    EXPECTED_DISPLAYED_COORDINATE_COUNT,
     EXPECTED_GEOCODED_COUNT,
     FACILITY_BASIC_CSV,
+    FACILITY_GEO_AUDIT_CSV,
     FACILITY_FUNCTIONS_CSV,
     FACILITY_GEO_LINKAGE_CSV,
     FACILITY_OBSERVATIONS_CSV,
@@ -229,31 +233,56 @@ def test_functions_key_omitted_when_empty(areas):
                 assert isinstance(f["functions"], list) and len(f["functions"]) > 0, f["record_id"]
 
 
-def test_coordinates_key_omitted_when_unmatched(areas):
+def test_coordinates_key_omitted_when_unmatched_or_withdrawn(areas):
+    """座標を持つのは「名寄せでmatched」かつ「検算で取り下げていない」施設だけ。
+
+    **match_status だけでは判定できない**(取り下げた施設はmatchedのまま座標を
+    持たない)。この非対称が入ったのがM10の変更点なので、ここで固定しておく。
+    """
     for a in areas:
         for f in a["facilities"]:
             has_coordinates = "coordinates" in f
-            assert has_coordinates == (f["match_status"] == "matched"), f["record_id"]
+            withdrawn = f.get("coordinate_withdrawn", False)
+            assert has_coordinates == (f["match_status"] == "matched" and not withdrawn), f["record_id"]
+            if withdrawn:
+                assert withdrawn is True, f["record_id"]
+                assert f["match_status"] == "matched", f["record_id"]
             if has_coordinates:
                 lon, lat = f["coordinates"]
                 assert 122 <= lon <= 154, f["record_id"]
                 assert 20 <= lat <= 46, f["record_id"]
 
 
-# --- 座標: 10,244件・match_statusとの整合 -------------------------------------
+# --- 座標: 名寄せ10,244件 − 検算で取り下げ76件 = 出力10,168件 ------------------
 
 
-def test_geocoded_count_is_10244_and_matches_geo_linkage_csv(areas, facilities_by_id):
+def test_geocoded_count_excludes_withdrawn(areas, facilities_by_id):
     total_geocoded = sum(a["geocoded_count"] for a in areas)
-    assert total_geocoded == EXPECTED_GEOCODED_COUNT
+    total_withdrawn = sum(a["coordinate_withdrawn_count"] for a in areas)
+    assert total_geocoded == EXPECTED_DISPLAYED_COORDINATE_COUNT
+    assert total_withdrawn == EXPECTED_COORDINATE_WITHDRAWN_COUNT
+    assert total_geocoded + total_withdrawn == EXPECTED_GEOCODED_COUNT
 
     with_coordinates = [rid for rid, f in facilities_by_id.items() if "coordinates" in f]
-    assert len(with_coordinates) == EXPECTED_GEOCODED_COUNT
+    assert len(with_coordinates) == EXPECTED_DISPLAYED_COORDINATE_COUNT
+
+    withdrawn_ids = {rid for rid, f in facilities_by_id.items() if f.get("coordinate_withdrawn")}
+    assert len(withdrawn_ids) == EXPECTED_COORDINATE_WITHDRAWN_COUNT
 
     with open(FACILITY_GEO_LINKAGE_CSV, "r", encoding="utf-8", newline="") as f:
         geo_rows = list(csv.DictReader(f))
     matched_ids = {r["record_id"] for r in geo_rows if r["match_status"] == "matched"}
-    assert set(with_coordinates) == matched_ids
+    assert set(with_coordinates) | withdrawn_ids == matched_ids
+    assert not (set(with_coordinates) & withdrawn_ids)
+
+
+def test_withdrawn_ids_are_exactly_the_audit_conflicts(facilities_by_id):
+    """取り下げる施設は facility_geo_audit.csv の audit_status=='conflict' と完全一致する。"""
+    with open(FACILITY_GEO_AUDIT_CSV, "r", encoding="utf-8", newline="") as f:
+        conflict_ids = {r["record_id"] for r in csv.DictReader(f) if r["audit_status"] == "conflict"}
+    withdrawn_ids = {rid for rid, fac in facilities_by_id.items() if fac.get("coordinate_withdrawn")}
+    assert withdrawn_ids == conflict_ids
+    assert len(conflict_ids) == EXPECTED_COORDINATE_WITHDRAWN_COUNT
 
 
 def test_coordinates_match_geo_linkage_csv_exactly(facilities_by_id):
@@ -261,11 +290,21 @@ def test_coordinates_match_geo_linkage_csv_exactly(facilities_by_id):
         geo_rows = list(csv.DictReader(f))
     for r in geo_rows:
         facility = facilities_by_id[r["record_id"]]
+        # match_status は名寄せの結果そのまま(取り下げても書き換えない)。
         assert facility["match_status"] == r["match_status"], r["record_id"]
-        if r["match_status"] == "matched":
+        if r["match_status"] == "matched" and not facility.get("coordinate_withdrawn"):
             assert facility["coordinates"] == pytest.approx([float(r["longitude"]), float(r["latitude"])])
         else:
             assert "coordinates" not in facility
+
+
+def test_withdrawn_facilities_keep_all_21_metrics(facilities_by_id):
+    """座標を取り下げても一覧からは消さない(21指標はそのまま出す)。"""
+    withdrawn = [f for f in facilities_by_id.values() if f.get("coordinate_withdrawn")]
+    assert len(withdrawn) == EXPECTED_COORDINATE_WITHDRAWN_COUNT
+    for f in withdrawn:
+        assert len(f["values"]) == len(METRICS), f["record_id"]
+        assert len(f["value_status"]) == len(METRICS), f["record_id"]
 
 
 # --- 変換の忠実性: facility_observations.csvの全246,960行と出力の値が一致 -----
@@ -321,7 +360,7 @@ def test_metadata_source_has_sha256(data):
     assert "source_sha256" in meta["source"]
     assert len(meta["source"]["source_sha256"]) == 64
     assert "inputs" in meta["processing"]
-    assert len(meta["processing"]["inputs"]) == 5
+    assert len(meta["processing"]["inputs"]) == 6
     for entry in meta["processing"]["inputs"]:
         assert set(entry.keys()) == {"path", "sha256"}
         assert len(entry["sha256"]) == 64
@@ -349,13 +388,14 @@ def test_derived_via_is_a_list_in_both_source_blocks(data):
     assert len(meta["geo_linkage_source"]["derived_via"]) > 0
 
 
-def test_metadata_caveat_has_all_four_inputs(data):
+def test_metadata_caveat_has_all_five_inputs(data):
     caveat = data["metadata"]["processing"]["caveat"]
     assert set(caveat.keys()) == {
         "facility_basic",
         "facility_observations",
         "facility_functions",
         "facility_geo_linkage",
+        "facility_geo_audit",
     }
     for value in caveat.values():
         assert isinstance(value, str) and value
@@ -381,6 +421,7 @@ def test_known_issues_are_carried_over_from_the_input_csv_metadata(data):
         FACILITY_OBSERVATIONS_CSV,
         FACILITY_FUNCTIONS_CSV,
         FACILITY_GEO_LINKAGE_CSV,
+        FACILITY_GEO_AUDIT_CSV,
     ):
         meta_path = csv_path.with_name(csv_path.name + ".meta.json")
         meta = json.loads(meta_path.read_text(encoding="utf-8"))

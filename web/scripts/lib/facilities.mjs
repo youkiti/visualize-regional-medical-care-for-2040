@@ -25,6 +25,7 @@
  *   pref_name: string,
  *   facility_count: number,
  *   geocoded_count: number,
+ *   coordinate_withdrawn_count: number,
  *   facilities: Array<Record<string, unknown>>,
  * }} area one entry of area_facilities_R7.json's `areas` array
  * @returns {{
@@ -34,6 +35,7 @@
  *   pref_name: string,
  *   facility_count: number,
  *   geocoded_count: number,
+ *   coordinate_withdrawn_count: number,
  *   facilities: Array<Record<string, unknown>>,
  * }}
  */
@@ -45,6 +47,7 @@ export function buildAreaShard(area) {
     pref_name: area.pref_name,
     facility_count: area.facility_count,
     geocoded_count: area.geocoded_count,
+    coordinate_withdrawn_count: area.coordinate_withdrawn_count,
     facilities: area.facilities,
   };
 }
@@ -67,7 +70,8 @@ export function buildAreaShard(area) {
  *   metadata: Record<string, unknown>,
  *   metrics: Array<Record<string, unknown>>,
  *   value_status_labels: Record<string, string>,
- *   areas: Array<{area_code: string, facility_count: number, geocoded_count: number}>,
+ *   areas: Array<{area_code: string, facility_count: number, geocoded_count: number,
+ *     coordinate_withdrawn_count: number}>,
  * }}
  */
 export function buildFacilitySummary(facilitiesData) {
@@ -79,6 +83,7 @@ export function buildFacilitySummary(facilitiesData) {
       area_code: area.area_code,
       facility_count: area.facility_count,
       geocoded_count: area.geocoded_count,
+      coordinate_withdrawn_count: area.coordinate_withdrawn_count,
     })),
   };
 }

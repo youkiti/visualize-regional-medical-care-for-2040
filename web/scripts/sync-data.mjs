@@ -94,7 +94,13 @@ const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for
 const EXPECTED_FEATURE_COUNT = 339;
 const EXPECTED_PREFECTURE_COUNT = 47;
 const EXPECTED_FACILITY_TOTAL = 11760;
-const EXPECTED_GEOCODED_TOTAL = 10244;
+// P04名寄せ（facility_geo_linkage.csv）が座標を与えた件数。
+const EXPECTED_MATCHED_TOTAL = 10244;
+// うち、医療情報ネットの公表座標との検算で1km以上離れていたため座標を出さない件数
+// （doc/FACILITY_GEO_AUDIT.md / doc/DECISION_FACILITY_COORDINATES.md）。
+const EXPECTED_COORDINATE_WITHDRAWN_TOTAL = 76;
+// 実際に地図へ点として出る件数。
+const EXPECTED_GEOCODED_TOTAL = EXPECTED_MATCHED_TOTAL - EXPECTED_COORDINATE_WITHDRAWN_TOTAL;
 const EXPECTED_YOY_FUNCTIONS = ['total', 'high_acute', 'acute', 'recovery', 'chronic'];
 // 339区域 × directions(2) × phases(3)。area_flow_R7.json のグループ総数
 // （tools/build_web_flow.py の検証13と同じ数）。
@@ -354,6 +360,7 @@ function main() {
   const facilityMetricsCount = facilitiesData.data.metrics.length;
   let totalFacilityCount = 0;
   let totalGeocodedCount = 0;
+  let totalWithdrawnCount = 0;
   for (const area of facilityAreas) {
     if (!Array.isArray(area.facilities) || area.facilities.length !== area.facility_count) {
       fail(
@@ -365,6 +372,7 @@ function main() {
     totalFacilityCount += area.facility_count;
 
     let actualGeocoded = 0;
+    let actualWithdrawn = 0;
     for (const facility of area.facilities) {
       if (facility.values.length !== facilityMetricsCount || facility.value_status.length !== facilityMetricsCount) {
         fail(
@@ -372,6 +380,33 @@ function main() {
             `values.length=${facility.values.length} value_status.length=${facility.value_status.length}, ` +
             `expected ${facilityMetricsCount}`
         );
+      }
+
+      // 座標を持たない理由は2通りある: 名寄せで特定できなかった（match_status
+      // !== 'matched'）か、検算で否定された（coordinate_withdrawn）か。後者は
+      // match_status==='matched' のまま座標を持たないので、**match_status から
+      // 座標の有無を導いてはいけない**。
+      if (facility.coordinate_withdrawn !== undefined) {
+        actualWithdrawn += 1;
+        if (facility.coordinate_withdrawn !== true) {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} has ` +
+              `coordinate_withdrawn=${JSON.stringify(facility.coordinate_withdrawn)} (expected true or absent)`
+          );
+        }
+        if (facility.match_status !== 'matched') {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} is ` +
+              `coordinate_withdrawn but match_status=${JSON.stringify(facility.match_status)} ` +
+              '(only a name-matched facility can have its coordinate withdrawn)'
+          );
+        }
+        if ('coordinates' in facility) {
+          fail(
+            `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} is ` +
+              'coordinate_withdrawn but still carries coordinates'
+          );
+        }
       }
 
       if ('coordinates' in facility) {
@@ -403,7 +438,15 @@ function main() {
           `match the number of facilities with coordinates (${actualGeocoded})`
       );
     }
+    if (actualWithdrawn !== area.coordinate_withdrawn_count) {
+      fail(
+        `area_facilities_R7.json: area ${area.area_code} coordinate_withdrawn_count ` +
+          `(${area.coordinate_withdrawn_count}) does not match the number of facilities with ` +
+          `coordinate_withdrawn (${actualWithdrawn})`
+      );
+    }
     totalGeocodedCount += area.geocoded_count;
+    totalWithdrawnCount += area.coordinate_withdrawn_count;
   }
 
   if (totalFacilityCount !== EXPECTED_FACILITY_TOTAL) {
@@ -416,6 +459,18 @@ function main() {
     fail(
       `area_facilities_R7.json: total geocoded_count across areas must be exactly ${EXPECTED_GEOCODED_TOTAL}, ` +
         `got ${totalGeocodedCount}`
+    );
+  }
+  if (totalWithdrawnCount !== EXPECTED_COORDINATE_WITHDRAWN_TOTAL) {
+    fail(
+      'area_facilities_R7.json: total coordinate_withdrawn_count across areas must be exactly ' +
+        `${EXPECTED_COORDINATE_WITHDRAWN_TOTAL}, got ${totalWithdrawnCount}`
+    );
+  }
+  if (totalGeocodedCount + totalWithdrawnCount !== EXPECTED_MATCHED_TOTAL) {
+    fail(
+      'area_facilities_R7.json: geocoded + withdrawn must equal the number of name-matched facilities ' +
+        `(${EXPECTED_MATCHED_TOTAL}), got ${totalGeocodedCount + totalWithdrawnCount}`
     );
   }
   // --- end area_facilities_R7.json validation ---------------------------
@@ -861,7 +916,7 @@ function main() {
   );
 
   // 6. web/public/downloads/<BUNDLE_FILE_NAME> — data/processed/ の加工済み
-  //    CSV16本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
+  //    CSV17本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
   //    と同じ理由でディレクトリを一掃してから作り直す(収録物が減ったときに
   //    古いファイルがdistへ残らないようにするため)。
   fs.rmSync(downloadsOutDir, { recursive: true, force: true });
@@ -951,7 +1006,7 @@ function main() {
 
   // 8. web/src/generated/download_manifest.json — UIがサイズ・SHA-256・収録物
   //    を表示するための軽量な一覧(bundle実体を取得しなくても内容を説明できる
-  //    ようにする)。membersは16本のCSVのみ(meta.jsonは含めない)。
+  //    ようにする)。membersは17本のCSVのみ(meta.jsonは含めない)。
   const downloadManifest = {
     bundle: {
       file: BUNDLE_FILE_NAME,

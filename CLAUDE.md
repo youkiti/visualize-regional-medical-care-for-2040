@@ -55,9 +55,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 9ページ「現行の二次医療圏・構想区域」が、三重県の4二次医療圏と8構想区域の対応・構成市町（29市町）を示す一次資料。三重県はこの両方を**併存**させており、構想区域は二次医療圏の細分（入れ子構造）。機械可読化した対応表は `data/reference/mie_area_municipalities.csv`（`tools/build_mie_area_municipalities.py` が生成し、A38の構成市区町村・医療機関所在地との5系統の突合で転記を検証する）。
 
+### iryojoho/ — 医療情報ネット（医療機能情報提供制度）オープンデータ
+
+| パス | 内容 |
+|---|---|
+| iryojoho/01-1_hospital_facility_info_20250601.zip | 病院（施設票）7,587件・2025-06-01時点。コミット済み |
+| iryojoho/02-1_clinic_facility_info_20250601.zip | 診療所（施設票）75,254件・同上。コミット済み |
+| iryojoho/001306376.xlsx | 公式のオープンデータ定義書（列の意味の一次資料）。コミット済み |
+
+**用途は監査（既に付与済みの座標の検算）に限る。このデータから座標を採ってはいない**（`tools/build_facility_geo_audit.py`）。座標源として統合するかは未決で、判断と根拠は `doc/DECISION_FACILITY_COORDINATES.md` にある。
+
+- 各zipはCSV1本（**UTF-8 BOM付き**・65列）。P04に無い **`所在地座標（緯度）`・`（経度）`**（列11・12）・**`都道府県コード`・`市区町村コード`**（列8・9）・**都道府県名から始まる完全な住所**（列10）・**病床の種別内訳**（列58〜65）を持つ。P04で必要だった点-多角形判定による同名市区町村の切り分けが要らない。
+- **座標のセンチネルは `0.0`/`0.0`**（実測4,456件・5.4%）。列自体は全行埋まって見えるので、**空欄判定では検出できない**。日本の緯度経度の範囲内かで判定すること。市立札幌病院のような大病院も該当する。
+- **`ID` は恒久IDではない**（出典ページが「移転等でも同じIDのままの場合がある」と明記）。実測では82,841件中の重複1組のみでほぼ一意だが、年度・制度をまたぐ同一性の保証には使えない。
+- 公表時点は5つある（2024-08-01〜2026-06-01）。**R7個票と同じ年度内の 2025-06-01 を採る**（最新版だと「原典が誤っている」のか「原典の後に移転した」のかを分離できない）。
+
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/prefecture_indicators_R7.json`（`tools/build_web_prefecture.py` が生成、47都道府県+全国の病床と需要）・`data/processed/prefecture_boundaries_R7.geojson`（`tools/build_prefecture_boundaries.py` が生成、47都道府県）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_yoy_R6_R7.json`（`tools/build_web_yoy.py` が生成、339構想区域のR6→R7年度間比較。見込量2025(R6)・実績2025(R7)・実績2024(R6)）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_flow_R7.json`（`tools/build_web_flow.py` が生成、339区域×2方向×3区分の患者流入出）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV16本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/flow/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/prefecture_indicators_R7.json`（`tools/build_web_prefecture.py` が生成、47都道府県+全国の病床と需要）・`data/processed/prefecture_boundaries_R7.geojson`（`tools/build_prefecture_boundaries.py` が生成、47都道府県）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_yoy_R6_R7.json`（`tools/build_web_yoy.py` が生成、339構想区域のR6→R7年度間比較。見込量2025(R6)・実績2025(R7)・実績2024(R6)）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_flow_R7.json`（`tools/build_web_flow.py` が生成、339区域×2方向×3区分の患者流入出）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV17本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/flow/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
@@ -69,7 +84,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `facility_summary.json` | 医療機関の区域別件数＋21指標の定義＋`value_status` のラベル＋出典（約38KB）。**バンドルに取り込み**、shard取得前でも件数を出せるようにし、出典欄と指標ラベルの正本にする |
 | `public/facilities/<区域コード>.json` × 339 | 区域ごとの医療機関の全データ（21指標＋機能＋座標）。**バンドルせず、区域を選んだときに1本だけfetchする**（合計6.8MB・gzipで中央値2.2KB／最大24KB） |
 | `public/flow/area_flow.json` | 患者の流入出の正本の忠実コピー（約499KB・gzip約126KB）。**バンドルせず、区域を初めて選んだときに1回だけfetchして以後は使い回す**。339分割していないのは、全体で1本しかなく取得先が選択に依存しないため（罠14の競合が原理的に起きない） |
-| `public/downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip` | 加工済みCSV16本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv`（計34エントリ・約2.4MB）。**バンドルせず、リンクからブラウザに直接ダウンロードさせる** |
+| `public/downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip` | 加工済みCSV17本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv`（計36エントリ・約3.4MB）。**バンドルせず、リンクからブラウザに直接ダウンロードさせる** |
 | `public/downloads/area_boundaries_R7.geojson` | 正本の忠実コピー（単体利用向け。ZIPには入れない） |
 | `src/generated/download_manifest.json` | ZIP/GeoJSONのサイズ・SHA-256・収録CSV一覧（約3.9KB）。**バンドルに取り込み**、一括DLセクションの表示に使う |
 | `prefecture_indicators.json` | 都道府県（概観レイヤ）の正本の忠実コピー（約75KB）。**バンドルに取り込み**、都道府県パネル・分位計算・出典表示に使う |
@@ -77,7 +92,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
 
-**CSVを1本増やすと `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` への追加が必須**（`sync-data` がこの配列と `data/processed/*.csv` の実在一覧を突合してビルドを落とす）。加えて**「CSV○本」「○エントリ」と件数を書いた記述がコード・コメント・テスト・ドキュメントに散っている**ので、`grep -rn '<旧件数>本'` で全て直すこと（M7で13→15本にしたとき、`bundle.mjs`・`bundle.test.ts`・`sync-data.mjs` のコメント・`types.ts` のJSDoc・`CLAUDE.md`・`README.md` の6か所に出現した）。
+**CSVを1本増やすと `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` への追加が必須**（`sync-data` がこの配列と `data/processed/*.csv` の実在一覧を突合してビルドを落とす）。加えて**「CSV○本」「○エントリ」と件数を書いた記述がコード・コメント・テスト・ドキュメントに散っている**ので、`grep -rn '<旧件数>本'` で全て直すこと（M7で13→15本にしたとき、`bundle.mjs`・`bundle.test.ts`・`sync-data.mjs` のコメント・`types.ts` のJSDoc・`CLAUDE.md`・`README.md` の6か所に出現した。M10で16→17本にしたときも同じ6か所＋`bundle.mjs` のZIP同梱README本文の「15本」表記）。
 
 ### パース時の注意（帳票形式のExcel）
 
@@ -239,6 +254,8 @@ npm run typecheck  # tsc --noEmit のみ
 33. **`published_fy` に無い値を発明しない**（M9）: 複数公表回にまたがる派生値（比など）に `'R6+R7'` のような値を入れると、利用者が `data/processed/*.csv` へ結合し直せなくなる。**横持ちなら列名側に由来を入れ**（`plan_2025_r6`・`actual_2025_r7`）、**長持ちなら空欄にして理由を note 列に書く**（罠20と同じ規律）。
 34. **zipのエントリ名は言語エンコーディングフラグ（0x800）を見て復号を分岐する**（M9）: 立っていなければ `zipfile` は cp437 でデコードしたままなので `name.encode("cp437").decode("cp932")` で戻す。無条件に変換すると UTF-8 フラグ付きの zip で `UnicodeEncodeError` になる。
 35. **配布物の名前に年度を入れたら、中身が変わったときに改名する**（M9）: 一括DL ZIP が `..._R7.zip` のままR6の行を含むと、名前が中身と食い違う。`BUNDLE_ROOT`/`BUNDLE_FILE_NAME` の1箇所を直せば `sync-data.mjs`・`download_manifest.json` は追随するが、`downloadAssets.test.ts` のリテラルと各ドキュメントの本数記述は手で直す必要がある。
+36. **座標の有無を `match_status` から導かない**（M10）: 名寄せで座標が付いた（`match_status==='matched'`）施設でも、**検算で否定されて座標を出さない**ものが76件ある（`coordinate_withdrawn`）。`match_status !== 'matched'` を「座標なし」の判定に使っている箇所は静かに壊れる（バッジの文言・地図の点・カバレッジ計算）。**`coordinates` の有無で判定する**こと。実際に `FacilityList.tsx`・`facilityPoints.ts`・`sync-data.mjs` の3箇所を直した。
+37. **正本CSVを書き換えず、下流で「出さない」ようにする**（M10）: 検算で否定された座標を `facility_geo_linkage.csv` から消すと、(a) 監査が linkage を読み linkage が監査を読む循環依存になり、(b)「P04名寄せの結果」という正本の意味が壊れる。**正本は名寄せの結果のまま保ち、取り下げは表示用データセット側（`build_web_facilities.py`）で行う**。`match_status` も書き換えない。値の補正と表示の抑制は別物で、前者だけが要件§4.3の改定を要する。
 
 ## ドキュメント
 
@@ -286,12 +303,13 @@ npm run typecheck  # tsc --noEmit のみ
 - 実装で判明した罠は「可視化実装で判明した罠」節の12〜16に記録
 
 **M6「CSVダウンロード + 加工データ一括配布」完了**: 要件 `doc/REQUIREMENTS.md` §3.3 の2方式をどちらも実装した。
-- **①表示条件絞り込みCSV**（`web/src/lib/downloads.ts` の3関数、`web/src/lib/csv.ts` の `toCsvText` でシリアライズ）:
-  - `buildAreaTableCsv` — 地図に表示中の指標（病床機能1つ or 需要区分1つ×年度1つ）を全339区域ぶん（Controls「表示中のデータをCSV」）
+- **①表示条件絞り込みCSV**（`web/src/lib/downloads.ts` の関数群、`web/src/lib/csv.ts` の `toCsvText` でシリアライズ）:
+  - `buildAreaTableCsv` — 地図に表示中の指標（病床機能1つ or 需要区分1つ×年度1つ）を全339区域ぶん（Controls「表示中のデータをCSV」、構想区域表示中）
   - `buildAreaDetailCsv` — 選択中の区域1つの基礎情報・病床・医療需要推計をlong形式で（AreaPanel「この区域の指標をCSV」）
   - `buildFacilityCsv` — 選択中の区域の医療機関一覧×21指標をlong形式で（FacilityList「一覧をCSV」）。座標を持たない施設も行として出す
-  - 3関数とも由来ヘッダー（`#`行、出典・出力条件・注記）をCSV本文の先頭に埋め込む（`buildPreamble`）。ダウンロード実行は `triggerDownload.ts` に分離
-- **②加工済みデータ一括DL**: `web/scripts/sync-data.mjs` が `data/processed/` の加工済みCSV16本＋各`.meta.json`をZIP化し `web/public/downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip`（34エントリ・約2.4MB）として書き出す。ZIP本体の組み立ては依存ゼロの自前実装（`web/scripts/lib/zip.mjs`）、MANIFEST.tsv・README.mdの内容は `web/scripts/lib/bundle.mjs`。`web/public/downloads/area_boundaries_R7.geojson`（正本の単体コピー）も同時に書き出す。画面側は `BulkDownload.tsx` が `download_manifest.json` を表示するだけで、ZIP自体はブラウザの通常のダウンロードに任せる（CSV本数・エントリ数・ファイル名はその後のM7・M9で上記の通り更新された）
+  - 各関数とも由来ヘッダー（`#`行、出典・出力条件・注記）をCSV本文の先頭に埋め込む（`buildPreamble`）。ダウンロード実行は `triggerDownload.ts` に分離
+  - （M7で `buildAreaFlowCsv`、M11で都道府県層の2本を追加。下記参照）
+- **②加工済みデータ一括DL**: `web/scripts/sync-data.mjs` が `data/processed/` の加工済みCSV17本＋各`.meta.json`をZIP化し `web/public/downloads/chiiki-iryo-koso_processed-csv_R6_R7.zip`（36エントリ・約3.4MB）として書き出す。ZIP本体の組み立ては依存ゼロの自前実装（`web/scripts/lib/zip.mjs`）、MANIFEST.tsv・README.mdの内容は `web/scripts/lib/bundle.mjs`。`web/public/downloads/area_boundaries_R7.geojson`（正本の単体コピー）も同時に書き出す。画面側は `BulkDownload.tsx` が `download_manifest.json` を表示するだけで、ZIP自体はブラウザの通常のダウンロードに任せる（CSV本数・エントリ数・ファイル名はその後のM7・M9で上記の通り更新された）
 - 実装で判明した罠は「可視化実装で判明した罠」節の17〜22に記録
 
 **M8「都道府県階層（概観レイヤ）」完了**: 要件 `doc/REQUIREMENTS.md` §3.1 の3階層のうち未着手だった都道府県層を実装した。
@@ -306,7 +324,7 @@ npm run typecheck  # tsc --noEmit のみ
 **M7「患者の流入・流出」完了**:
 - パーサ `tools/parse_patient_flow.py` → `patient_flow.csv`（10,408行 = 339区域×2方向×3区分×相手区域）・`patient_flow_total.csv`（678行 = 原典の「全体の流入率/流出率」）。**この帳票にはブロック番号の連番列が無い**ため、位置は算術生成し、グリッドが `max_row` に一致すること・A列の都道府県コード・339区域コードの3点で担保している（上記「パース時の注意」参照）
 - 表示用データセット `tools/build_web_flow.py` → `data/processed/area_flow_R7.json`（約499KB・検証13項目で中断）。**339×2×3=2,034グループを全て materialize する**（原典にデータ行が1行も無いグループが6件あり、表示側が `undefined` を踏まないようにするため）。自区域行が無いグループが12件あることも検証で固定している
-- 配信は `web/public/flow/area_flow.json`（バンドルせず、区域を初めて選んだときに1回だけfetch。罠27）。加工済みCSV一括ZIPは13本→15本（32エントリ）になった（その後M9で16本・34エントリへ更新）
+- 配信は `web/public/flow/area_flow.json`（バンドルせず、区域を初めて選んだときに1回だけfetch。罠27）。加工済みCSV一括ZIPは13本→15本（32エントリ）になった（その後M9で16本・34エントリ、M10で17本・36エントリへ更新）
 - 区域パネルに「患者の流入・流出（NDB 2024年度）」セクション（方向×区分のトグル・自区域内完結率・相手区域トップN・**打ち切り分の明示**・CSVダウンロード）。地図は**選択区域を起点に相手区域を塗り分ける**オーバーレイ（既定OFF、指標セレクタ操作で自動解除）
 - 原典側の欠陥2件を `known_issues` に登録（`flow_overall_rate_equals_acute_phase_complement`・`flow_outflow_chronic_value_error_cells`）
 - 実装で判明した罠は「可視化実装で判明した罠」節の26〜29に記録
@@ -320,4 +338,23 @@ npm run typecheck  # tsc --noEmit のみ
 - **並行して main に統合された M7（患者の流入・流出）・M8（都道府県階層）とマージし、両機能を統合**（`published_fy` の年度並存が M7・M8 側の「R7限定を暗黙の前提にした」下流を壊す意味論的衝突を解消した。詳細は下記罠30〜35）
 - 実装で判明した罠は「可視化実装で判明した罠」節の30〜35に記録
 
-**未実装**: 都道府県ぶんの絞り込みCSV（M6の `buildAreaTableCsv` は常に339構想区域を出す。都道府県表示中はボタンのラベルでその旨を示している）。
+**M11「都道府県ぶんの絞り込みCSV」完了**: M6で区域層にしか無かった①表示条件絞り込みCSVを、都道府県層（概観レイヤ）にも用意した。新しいデータセットは作っていない（既存の `prefecture_indicators_R7.json` だけを読む）。
+- `buildPrefectureTableCsv` — 地図に表示中の指標を全47都道府県ぶん（Controls「表示中のデータをCSV（47都道府県）」）。`App.tsx` が `level` で `buildAreaTableCsv` と出し分ける
+- `buildPrefectureDetailCsv` — 選択中の都道府県1つの基礎情報・病床・医療需要推計をlong形式で（PrefecturePanel「この都道府県の指標をCSV」）
+- **全国（`pref_code='00'`）は行に含めない**。47都道府県と同じ列に並べると、利用者が合計したとき二重計上になる（画面のパネルは「（参考）」と畳んで区別しているが、CSVには畳む仕組みが無い）。除外した理由は出力条件行に必ず書く
+- **行の由来が混在するので note 列で区別する**: 病床・2020年人口・面積は厚労省の都道府県別公表値そのもの、需要と基準人口/2040年人口は構想区域からの合計（罠25の「値の真横にも注記」をCSVで満たすには列を使う）。preamble側の文言は `known_issues` の `prefecture_demand_aggregated_by_this_repository` から引き、ハードコードしない
+- 出典は病床側 `source_beds` と需要側 `source_demand` を使い分ける（都道府県のmetadataには単一の `source` キーが無い。罠11）。detail CSVは両方含むため病床側を主・需要側を追加の出典行にする
+- **都道府県×年度間比較（R6→R7）だけは出せない**（下記「未実装」）。`buildPrefectureTableCsv` は yoy 指標で throw し、`Controls` がその組み合わせでボタンを無効化して理由を `title` に出す
+
+**M10「医療機関座標の監査 + カバレッジ表示」完了**: 要件 `doc/REQUIREMENTS.md` §7 の未決事項（住所ジオコーディングへの切替）に決着をつけた。
+- **§7 は No-Go で決着**（決定記録は `doc/DECISION_FACILITY_COORDINATES.md`）。原典が住所（番地）を持たずジオコーディングの入力自体が別データセット依存になるため名寄せ問題が移動するだけであること、および §4.3「位置の推測はしない」に反することが理由。**代わりに医療情報ネットが公表座標そのものを持つことが判明**したが、その統合は §4.3 の改定を伴うため別件として保留（実測では830件を回収でき 87.1%→94.2% になる）
+- 監査 `tools/build_facility_geo_audit.py` → `data/processed/facility_geo_audit.csv`（11,760行）・`doc/FACILITY_GEO_AUDIT.md`（検証10項目）。**参照側の座標は採用しない**（`facility_geo_linkage.csv` を書き換えない。罠37）
+- **結果: 距離の中央値13m・90%点65m・99%点977mで、P04由来の座標は大半が今も妥当。ただし76件が1km以上（最大32km）食い違う**。住所を突き合わせると「住所は実質同一なのに座標だけ数km離れている（＝いずれかの座標そのものが誤り）」と「住所自体が違う（＝移転）」の2種類がある
+- この76件は**表示用データセットで座標を出さない**（`coordinate_withdrawn`。一覧には21指標とともに残す）。地図に出る座標は 10,244→**10,168件**。原典側の欠陥として `known_issues` に登録（`facility_coordinate_conflicts_with_published_reference`）
+- 区域パネルに座標カバレッジを常設（例「地図に表示：46件 / この区域の50件（名寄せで位置を特定できず 3件、座標が不一致 1件）」）。凡例にも「点の密度で地域を比べることはできない」旨を明記
+- 加工済みCSV一括ZIPは16本→**17本**（36エントリ）になった
+- 実装で判明した罠は「可視化実装で判明した罠」節の36〜37に記録
+
+**保留**: 医療情報ネットの公表座標を座標源として統合すること（要件 §4.3 の改定を伴う。判断材料・満たすべき条件・越えてはならない一線・再検討条件はすべて `doc/DECISION_FACILITY_COORDINATES.md` にある）。
+
+**未実装**: 都道府県層の年度間比較（R6→R7）。データ自体は `prefecture_beds.csv` に揃っており（R6の見込量2025・実績2024、R7の実績2025が48エンティティ×5機能=240キーずつ、**分母0が1件も無く**、都道府県の2024年実績はR6/R7で240キー完全一致するため区域層で必要だった `area_yoy_2024_actual_from_r6` の判断も不要）、`prefecture_yoy_R6_R7.json` を作って `buildPrefectureMap` に `y_*` プロパティを足せば、地図・凡例・ツールチップは指標キー名で駆動しているためそのまま動く。現状は都道府県表示中にyoy指標を選ぶと地図が全県「算出不可」になる。

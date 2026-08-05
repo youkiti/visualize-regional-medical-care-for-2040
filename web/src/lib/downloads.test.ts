@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildAreaDetailCsv, buildAreaFlowCsv, buildAreaTableCsv, buildFacilityCsv } from './downloads';
+import {
+  buildAreaDetailCsv,
+  buildAreaFlowCsv,
+  buildAreaTableCsv,
+  buildFacilityCsv,
+  buildPrefectureDetailCsv,
+  buildPrefectureTableCsv,
+} from './downloads';
 import type {
   AreaDemandArea,
   AreaDemandData,
@@ -19,6 +26,9 @@ import type {
   FlowDirectionKey,
   FlowPhaseGroup,
   FlowPhaseKey,
+  PrefectureIndicator,
+  PrefectureIndicatorsData,
+  PrefectureIndicatorsMetadata,
 } from '../types';
 
 // 小さなインラインフィクスチャのみを使う。src/generated/* はnpm run sync-data
@@ -262,6 +272,7 @@ function makeShard(overrides: Partial<FacilityShard> = {}): FacilityShard {
     pref_name: '北海道',
     facility_count: 1,
     geocoded_count: 1,
+    coordinate_withdrawn_count: 0,
     facilities: [makeFacility()],
     ...overrides,
   };
@@ -948,5 +959,336 @@ describe('buildAreaFlowCsv', () => {
       '注記: 原典は一定数以上の患者がいる区域のみ表示するため、rateの合計は1になりません（表示されていない分は算出できません）'
     );
     expect(text).toContain('注記（全体値について）: 全体の流入率・流出率は3区分の合計ではありません');
+  });
+});
+
+// ---- 都道府県層（概観レイヤ）のCSV -----------------------------------------
+
+const PREF_DERIVED_ISSUE_SUMMARY = '需要と基準人口は構想区域単位でのみ公表されており、本リポジトリが合計した派生値である';
+const PREF_DERIVED_ISSUE_ACTION = '合計値を出力し、派生値であることを記録する';
+
+const PREFECTURE_METADATA: PrefectureIndicatorsMetadata = {
+  title: 'test-prefecture',
+  // 区域側の AreaIndicatorsMetadata と違い source は無く、病床/需要の2ブロックに
+  // 分かれている（types.ts の PrefectureIndicatorsMetadata のコメント参照）。
+  source_beds: {
+    name: '①都道府県の病床数等（別添４）',
+    publisher: '厚生労働省',
+    url: 'https://example.test/001722915.xlsx',
+    page_url: 'https://example.test/pref-beds-page',
+    fiscal_year: '令和7年度（2025年度）',
+    source_file: 'R7/001722915.xlsx',
+    source_sha256: 'eeee',
+    source_sheet: 'Sheet1',
+    acquired_date: '2026-08-04',
+    license: 'テスト利用規約',
+    original_title: '都道府県の病床数等の状況',
+    original_notes: [],
+    derived_via: [],
+  },
+  source_demand: {
+    name: '構想区域別の医療需要推計',
+    publisher: '厚生労働省',
+    url: 'https://example.test/001728462.xlsx',
+    page_url: 'https://example.test/pref-demand-page',
+    fiscal_year: '令和7年度（2025年度）',
+    source_file: 'R7/001728462.xlsx',
+    source_sha256: 'ffff',
+    source_sheet: '将来の在宅（訪問診療）需要推計',
+    acquired_date: '2026-08-04',
+    license: 'テスト利用規約',
+    original_title: '将来の在宅（訪問診療）需要推計',
+    original_notes: [],
+    derived_via: [],
+  },
+  processing: {
+    script: 'tools/build_web_prefecture.py',
+    inputs: [],
+    steps: [],
+    caveat: {
+      beds: '都道府県の病床の注記テキスト',
+      demand_forecast: '都道府県のレセプト件数/月の注記',
+      demand_population: '都道府県の基準人口の注記',
+    },
+  },
+  fields: {},
+  known_issues: [
+    {
+      id: 'prefecture_demand_aggregated_by_this_repository',
+      summary: PREF_DERIVED_ISSUE_SUMMARY,
+      action: PREF_DERIVED_ISSUE_ACTION,
+    },
+  ],
+};
+
+function makePrefecture(overrides: Partial<PrefectureIndicator> = {}): PrefectureIndicator {
+  return {
+    pref_code: '01',
+    pref_name: '北海道',
+    area_count: 21,
+    population_2020: 5224614,
+    area_km2: 83424.31,
+    population_2024: 5060000,
+    population_2040: 4280000,
+    beds: {
+      total: { actual_2025: 78000, need_2025: 70000 },
+      high_acute: { actual_2025: 5000, need_2025: 4000 },
+      acute: { actual_2025: 30000, need_2025: 25000 },
+      recovery: { actual_2025: 15000, need_2025: 20000 },
+      chronic: { actual_2025: 28000, need_2025: 21000 },
+    },
+    demand: {
+      home_care: { '2024': 50000, '2030': 55000, '2040': 60000 },
+      outpatient: { '2024': 2000000, '2030': 1900000, '2040': 1700000 },
+    },
+    ...overrides,
+  };
+}
+
+function makePrefectureData(prefectures: PrefectureIndicator[]): PrefectureIndicatorsData {
+  return {
+    metadata: PREFECTURE_METADATA,
+    functions: ['total', 'high_acute', 'acute', 'recovery', 'chronic'],
+    function_labels: FULL_FUNCTION_LABELS,
+    categories: ['home_care', 'outpatient'],
+    category_labels: { home_care: '在宅（訪問診療）', outpatient: '外来' },
+    years: [2024, 2030, 2040],
+    year_labels: { '2024': '2024年度', '2030': '2030年度（現状投影）', '2040': '2040年度（現状投影）' },
+    baseline_year: 2024,
+    // 全国は prefectures[] とは別のキーに置かれている。CSVには出さない
+    // （47都道府県と合計すると二重計上になるため）。
+    national: makePrefecture({ pref_code: '00', pref_name: '全国', area_count: 339 }),
+    prefectures,
+  };
+}
+
+describe('buildPrefectureTableCsv (bed metrics)', () => {
+  it('produces one row per prefecture for the selected bed function, with a self-describing filename/header', () => {
+    const data = makePrefectureData([
+      makePrefecture(),
+      makePrefecture({ pref_code: '13', pref_name: '東京都', area_count: 13 }),
+    ]);
+
+    const { filename, text } = buildPrefectureTableCsv({
+      prefectures: data,
+      metric: 'ratio',
+      bedFunction: 'acute',
+      year: 2024,
+    });
+
+    expect(filename).toBe('prefecture_beds_ratio_acute_2025_R7.csv');
+
+    const lines = text.split('\r\n');
+    const header = lines.find((l) => l.startsWith('published_fy'))!;
+    expect(header).toBe(
+      'published_fy,pref_code,pref_name,area_count,bed_function,actual_2025,need_2025,diff,ratio,note'
+    );
+
+    const dataLines = lines.filter((l) => l.startsWith('R7,'));
+    expect(dataLines).toHaveLength(2);
+    // 30000/25000 = 1.2
+    expect(dataLines[0]).toBe('R7,01,北海道,21,急性期,30000,25000,5000,1.2,');
+    expect(dataLines[1]).toBe('R7,13,東京都,13,急性期,30000,25000,5000,1.2,');
+
+    expect(text).toContain('原典ファイル: R7/001722915.xlsx（SHA-256: eeee）');
+    expect(text).toContain('掲載ページ: https://example.test/pref-beds-page');
+    expect(text).toContain('注記: 都道府県の病床の注記テキスト');
+  });
+
+  it('excludes 全国 (pref_code=00) from the rows and says why in the preamble', () => {
+    const data = makePrefectureData([makePrefecture()]);
+
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      metric: 'actual',
+      bedFunction: 'total',
+      year: 2024,
+    });
+
+    // national は prefectures[] の外にあるので行にならない。合計して検算する
+    // 利用者が二重計上しないための最重要の性質なので、明示的に固定する
+    // （preamble側には除外理由として「全国」の語が出るので、データ行だけを見る）。
+    const dataLines = text.split('\r\n').filter((l) => l.startsWith('R7,'));
+    expect(dataLines).toHaveLength(1);
+    expect(dataLines.some((l) => l.includes('全国'))).toBe(false);
+    expect(dataLines.some((l) => l.startsWith('R7,00,'))).toBe(false);
+    expect(text).toContain(
+      '出力条件: 指標=実績病床数（2025年実績）, 病床機能=合計, 対象=全1都道府県（全国（pref_code=00）は含まない。47都道府県と合計すると二重計上になるため）'
+    );
+  });
+
+  it('marks the ratio unavailable (blank + note) when need_2025 is 0', () => {
+    const data = makePrefectureData([
+      makePrefecture({
+        beds: {
+          total: { actual_2025: 78000, need_2025: 70000 },
+          high_acute: { actual_2025: 120, need_2025: 0 },
+          acute: { actual_2025: 30000, need_2025: 25000 },
+          recovery: { actual_2025: 15000, need_2025: 20000 },
+          chronic: { actual_2025: 28000, need_2025: 21000 },
+        },
+      }),
+    ]);
+
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      metric: 'ratio',
+      bedFunction: 'high_acute',
+      year: 2024,
+    });
+
+    const row = text.split('\r\n').find((l) => l.startsWith('R7,01,'))!;
+    expect(row).toBe('R7,01,北海道,21,高度急性期,120,0,120,,必要数が0のため比は算出不可');
+  });
+});
+
+describe('buildPrefectureTableCsv (demand metrics)', () => {
+  it('uses the demand source block, rounds ratio_to_2024, and marks every row as an aggregate', () => {
+    const data = makePrefectureData([makePrefecture()]);
+
+    const { filename, text } = buildPrefectureTableCsv({
+      prefectures: data,
+      metric: 'demand_home_care',
+      bedFunction: 'total',
+      year: 2040,
+    });
+
+    expect(filename).toBe('prefecture_demand_home_care_2040_R7.csv');
+
+    const lines = text.split('\r\n');
+    const header = lines.find((l) => l.startsWith('published_fy'))!;
+    expect(header).toBe(
+      'published_fy,pref_code,pref_name,area_count,demand_category,year,year_label,receipts_per_month,baseline_2024,ratio_to_2024,note'
+    );
+
+    // 60000/50000 = 1.2。note列は罠25（派生であることを値の真横にも置く）。
+    const row = lines.find((l) => l.startsWith('R7,01,'))!;
+    expect(row).toBe(
+      'R7,01,北海道,21,在宅（訪問診療）,2040,2040年度（現状投影）,60000,50000,1.2,構想区域の値を本サイトが合計した派生値（厚生労働省の都道府県別公表値ではない）'
+    );
+
+    // 病床側(source_beds)ではなく需要側(source_demand)の出典が入る。
+    expect(text).toContain('原典ファイル: R7/001728462.xlsx（SHA-256: ffff）');
+    expect(text).toContain('掲載ページ: https://example.test/pref-demand-page');
+    expect(text).not.toContain('001722915.xlsx');
+    expect(text).toContain('注記: 都道府県のレセプト件数/月の注記');
+  });
+
+  it('quotes the known_issue text from metadata (not a hardcoded string) for the derived-value note', () => {
+    const data = makePrefectureData([makePrefecture()]);
+
+    const { text } = buildPrefectureTableCsv({
+      prefectures: data,
+      metric: 'demand_outpatient',
+      bedFunction: 'total',
+      year: 2024,
+    });
+
+    expect(text).toContain(
+      `注記（医療需要・基準人口が派生値であること）: ${PREF_DERIVED_ISSUE_SUMMARY}／${PREF_DERIVED_ISSUE_ACTION}`
+    );
+  });
+});
+
+describe('buildPrefectureTableCsv (yoy metrics)', () => {
+  it('throws instead of silently emitting the 339-area CSV (都道府県層に年度間比較のデータセットが無い)', () => {
+    const data = makePrefectureData([makePrefecture()]);
+
+    expect(() =>
+      buildPrefectureTableCsv({ prefectures: data, metric: 'yoy_plan_vs_actual', bedFunction: 'total', year: 2024 })
+    ).toThrow(/年度間比較/);
+    expect(() =>
+      buildPrefectureTableCsv({ prefectures: data, metric: 'yoy_actual_change', bedFunction: 'total', year: 2024 })
+    ).toThrow(/年度間比較/);
+  });
+});
+
+describe('buildPrefectureDetailCsv', () => {
+  const detailArgs = {
+    prefecture: makePrefecture(),
+    metadata: PREFECTURE_METADATA,
+    functions: ['total', 'high_acute'] as BedFunctionKey[],
+    functionLabels: FULL_FUNCTION_LABELS,
+    demandCategories: ['home_care'] as Array<'home_care' | 'outpatient'>,
+    demandCategoryLabels: { home_care: '在宅（訪問診療）', outpatient: '外来' },
+    demandYears: [2024, 2040],
+    demandYearLabels: { '2024': '2024年度', '2040': '2040年度（現状投影）' },
+    baselineYear: 2024,
+  };
+
+  it('emits basic/beds/demand rows for one prefecture, separating published values from aggregates', () => {
+    const { filename, text } = buildPrefectureDetailCsv(detailArgs);
+
+    expect(filename).toBe('prefecture_01_indicators_R7.csv');
+
+    const lines = text.split('\r\n');
+    expect(lines.find((l) => l.startsWith('published_fy'))!).toBe(
+      'published_fy,pref_code,pref_name,area_count,dataset,category,series,year,value,unit,note'
+    );
+
+    const dataLines = lines.filter((l) => l.startsWith('R7,01,'));
+    // basic 4 + beds 2機能×4 + demand 1区分×2年×2系列 = 16行
+    expect(dataLines).toHaveLength(16);
+
+    // 公表値そのものの行は note が空。
+    expect(dataLines[0]).toBe('R7,01,北海道,21,basic,基礎情報,人口（2020年国勢調査）,2020,5224614,人,');
+    expect(dataLines[1]).toBe('R7,01,北海道,21,basic,基礎情報,面積,,83424.31,km2,');
+
+    // 構想区域からの合計である行は note で区別する。基準人口はさらに
+    // 「原典間で年が食い違っている」注記も併記する。
+    // note は全角のみでASCIIの , " CR LF を含まないため、CSVのクォートは付かない。
+    expect(dataLines[2]).toBe(
+      'R7,01,北海道,21,basic,基礎情報,人口（医療需要推計の基準人口）,,5060000,人,' +
+        '構想区域の値を本サイトが合計した派生値（厚生労働省の都道府県別公表値ではない）／' +
+        '基準人口の年は原典間で不一致（原典Excelの見出しは2024年度、公式説明書は2025年）。本サイトは原典Excelの値をそのまま出力している'
+    );
+    expect(dataLines[3]).toBe(
+      'R7,01,北海道,21,basic,基礎情報,人口（2040年推計）,2040,4280000,人,構想区域の値を本サイトが合計した派生値（厚生労働省の都道府県別公表値ではない）'
+    );
+
+    // 病床は厚労省の都道府県別公表値そのものなので note は空のまま。
+    expect(dataLines[4]).toBe('R7,01,北海道,21,beds,合計,実績,2025,78000,床,');
+    expect(dataLines[7]).toBe('R7,01,北海道,21,beds,合計,比（実績/必要数）,2025,1.1143,,');
+
+    // 需要は基準年の行が必ず 1（比の計算をせず定数を入れている）。
+    expect(dataLines[12]).toBe(
+      'R7,01,北海道,21,demand,在宅（訪問診療）,レセプト件数/月,2024,50000,件/月,' +
+        '2024年度／構想区域の値を本サイトが合計した派生値（厚生労働省の都道府県別公表値ではない）'
+    );
+    expect(dataLines[13]).toContain(',demand,在宅（訪問診療）,2024年度比,2024,1,,');
+    expect(dataLines[15]).toContain(',demand,在宅（訪問診療）,2024年度比,2040,1.2,,');
+  });
+
+  it('carries both source blocks and all three caveats in the preamble (病床が主・需要が追加行)', () => {
+    const { text } = buildPrefectureDetailCsv(detailArgs);
+
+    expect(text).toContain('原典ファイル: R7/001722915.xlsx（SHA-256: eeee）');
+    expect(text).toContain(
+      '医療需要推計の原典ファイル: R7/001728462.xlsx（SHA-256: ffff） / 掲載ページ: https://example.test/pref-demand-page'
+    );
+    expect(text).toContain('出力条件: 対象=都道府県 01 北海道（構想区域 21 区域）');
+    expect(text).toContain('注記: 都道府県の病床の注記テキスト');
+    expect(text).toContain('注記（医療需要推計）: 都道府県のレセプト件数/月の注記 都道府県の基準人口の注記');
+    expect(text).toContain(
+      `注記（医療需要・基準人口が派生値であること）: ${PREF_DERIVED_ISSUE_SUMMARY}／${PREF_DERIVED_ISSUE_ACTION}`
+    );
+  });
+
+  it('marks the bed ratio unavailable when need_2025 is 0, like the area-level detail CSV', () => {
+    const { text } = buildPrefectureDetailCsv({
+      ...detailArgs,
+      prefecture: makePrefecture({
+        beds: {
+          total: { actual_2025: 78000, need_2025: 70000 },
+          high_acute: { actual_2025: 120, need_2025: 0 },
+          acute: { actual_2025: 30000, need_2025: 25000 },
+          recovery: { actual_2025: 15000, need_2025: 20000 },
+          chronic: { actual_2025: 28000, need_2025: 21000 },
+        },
+      }),
+    });
+
+    const row = text.split('\r\n').find((l) => l.includes('beds,高度急性期,比（実績/必要数）'))!;
+    expect(row).toBe('R7,01,北海道,21,beds,高度急性期,比（実績/必要数）,2025,,,必要数が0のため比は算出不可');
   });
 });

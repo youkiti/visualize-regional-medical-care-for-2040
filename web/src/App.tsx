@@ -12,7 +12,14 @@ import { useFacilityShard } from './lib/facilityShard';
 import { useFlowData } from './lib/flowData';
 import type { FlowOverlay } from './lib/flowMap';
 import { buildFacilityPoints } from './lib/facilityPoints';
-import { buildAreaDetailCsv, buildAreaFlowCsv, buildAreaTableCsv, buildFacilityCsv } from './lib/downloads';
+import {
+  buildAreaDetailCsv,
+  buildAreaFlowCsv,
+  buildAreaTableCsv,
+  buildFacilityCsv,
+  buildPrefectureDetailCsv,
+  buildPrefectureTableCsv,
+} from './lib/downloads';
 import { triggerDownload } from './lib/triggerDownload';
 import mapDataUrl from './generated/area_map.json?url';
 import prefMapDataUrl from './generated/pref_map.json?url';
@@ -333,11 +340,35 @@ export default function App() {
   // （新しいデータ処理はここに書かない）。ボタン側で無効化される条件
   // （選択区域なし・shard未取得）を、念のためハンドラ内でも防御的に握る。
 
-  // 今の指標・病床機能・年度のまま、全339区域ぶんをCSVにする(Controls「表示中のデータをCSV」)。
-  const handleDownloadAreaTable = useCallback(() => {
-    const { filename, text } = buildAreaTableCsv({ indicators, demand, yoy, metric, bedFunction, year: selectedYear });
+  // 今の指標・病床機能・年度のまま、地図に出ている表示単位ぶんをCSVにする
+  // (Controls「表示中のデータをCSV」)。表示単位が都道府県なら47都道府県、
+  // 構想区域なら339区域を出す。都道府県×年度間比較の組み合わせは
+  // buildPrefectureTableCsv が throw するため、Controls側でボタンを無効化して
+  // ある(データセットが無い旨をtitleで説明している)。
+  const handleDownloadTable = useCallback(() => {
+    const { filename, text } =
+      level === 'pref'
+        ? buildPrefectureTableCsv({ prefectures: prefectureIndicators, metric, bedFunction, year: selectedYear })
+        : buildAreaTableCsv({ indicators, demand, yoy, metric, bedFunction, year: selectedYear });
     triggerDownload(filename, text);
-  }, [metric, bedFunction, selectedYear]);
+  }, [level, metric, bedFunction, selectedYear]);
+
+  // 選択中の都道府県1つの指標をCSVにする(PrefecturePanel「この都道府県の指標をCSV」)。
+  const handleDownloadPrefectureDetail = useCallback(() => {
+    if (!selectedPrefecture) return;
+    const { filename, text } = buildPrefectureDetailCsv({
+      prefecture: selectedPrefecture,
+      metadata: prefectureIndicators.metadata,
+      functions: prefectureIndicators.functions,
+      functionLabels: prefectureIndicators.function_labels,
+      demandCategories: prefectureIndicators.categories,
+      demandCategoryLabels: prefectureIndicators.category_labels,
+      demandYears: prefectureIndicators.years,
+      demandYearLabels: prefectureIndicators.year_labels,
+      baselineYear: prefectureIndicators.baseline_year,
+    });
+    triggerDownload(filename, text);
+  }, [selectedPrefecture]);
 
   // 選択中の区域1つの指標をCSVにする(AreaPanel「この区域の指標をCSV」)。
   const handleDownloadAreaDetail = useCallback(() => {
@@ -430,7 +461,7 @@ export default function App() {
             areas={indicators.areas}
             onSelectArea={handleSearchSelect}
             onResetView={handleResetView}
-            onDownloadAreaTable={handleDownloadAreaTable}
+            onDownloadTable={handleDownloadTable}
             years={demand.years}
             yearLabels={demand.year_labels}
             yearIndex={yearIndex}
@@ -460,6 +491,7 @@ export default function App() {
                 demandYearLabels={prefectureIndicators.year_labels}
                 demandBaselineYear={prefectureIndicators.baseline_year}
                 onDrillDown={handleDrillDownToAreas}
+                onDownloadDetail={handleDownloadPrefectureDetail}
               />
             ) : (
               <p className="area-panel-placeholder">

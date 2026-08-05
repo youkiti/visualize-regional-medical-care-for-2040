@@ -36,8 +36,11 @@ export const EMPTY_FACILITY_POINTS: FacilityPointFeatureCollection = { type: 'Fe
 
 /**
  * 選択区域のfacilities配列から、地図の circle レイヤに渡すGeoJSONを組み立てる。
- * - `coordinates` を持たない施設(match_status !== 'matched'、位置を推測しない
- *   方針— doc/REQUIREMENTS.md §4.3)は除外する
+ * - `coordinates` を持たない施設は除外する。理由は2通りあり、どちらも
+ *   除外する: (a) 名寄せで位置を一意に特定できなかった(match_status !==
+ *   'matched'。位置を推測しない方針 — doc/REQUIREMENTS.md §4.3)、
+ *   (b) 名寄せでは座標が付いたが検算で否定された(coordinate_withdrawn。
+ *   doc/FACILITY_GEO_AUDIT.md)。**match_status では判定しない**
  * - プロパティはフラットなスカラーのみ(CLAUDE.md罠7)
  * - `beds_total` は metrics 配列から 'beds_total' キーの位置を引き、その施設の
  *   value_status が 'observed' のときだけ持たせる(未観測を0にしない)

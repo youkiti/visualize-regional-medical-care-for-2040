@@ -1,0 +1,96 @@
+{
+  "title": "医療機関の付与済み座標(P04-20由来)と医療情報ネットの公表座標の検算結果",
+  "source": {
+    "name": "付与済み医療機関座標(facility_geo_linkage.csv、P04-20由来) × 医療情報ネットの公表座標の検算",
+    "inputs": [
+      {
+        "file": "iryojoho/01-1_hospital_facility_info_20250601.zip",
+        "role": "参照座標(医療情報ネット 病院施設票、2025-06-01時点)",
+        "source_sha256": "bc1ee5f4614a3cd0d66b0ce1d736b857426feb511ca3163925bd7285ba8bffd1"
+      },
+      {
+        "file": "iryojoho/02-1_clinic_facility_info_20250601.zip",
+        "role": "参照座標(医療情報ネット 診療所施設票、2025-06-01時点)",
+        "source_sha256": "366679df93a61c6eded7bcf4ad680c805461a747242560ff38f535c237265575"
+      },
+      {
+        "file": "data/processed/facility_geo_linkage.csv",
+        "role": "監査対象(現在この可視化サイトが使っている座標)",
+        "source_sha256": "30b3655b244f505ce094a830568e238a12432de1204633715321d6e7b3f55ce6"
+      },
+      {
+        "file": "data/processed/facility_basic.csv",
+        "role": "医療機関の識別情報(名称・市区町村・区域)",
+        "source_sha256": "632270d517977e37abb8af079f76dccdaec6f1dd174d36eea448cd14a1892116"
+      },
+      {
+        "file": "data/processed/area_boundaries_R7.geojson",
+        "role": "参照座標がどの構想区域に落ちるかの点-多角形判定",
+        "source_sha256": "385f9ed78adfbf426ed8aaabde227a7e975051450c1e9a4f38b684a1c53b8a9e"
+      }
+    ],
+    "page_url": "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/kenkou_iryou/iryou/newpage_43373.html",
+    "reference_snapshot_date": "2025-06-01"
+  },
+  "processing": {
+    "script": "tools/build_facility_geo_audit.py",
+    "date": "2026-08-05",
+    "method": "医療情報ネットの公表座標を参照として、付与済み座標との大円距離を実測する。参照の同定は同一都道府県内で正規化名が完全一致し市区町村も整合し候補が1件だけの場合のみ(名寄せ本体と同じ保守性)。距離は100m未満=agree、1000m以上=conflictに区分する。**参照側の座標は採用しない**(このスクリプトはfacility_geo_linkage.csvを書き換えない)",
+    "agree_max_m": 100.0,
+    "conflict_min_m": 1000.0,
+    "steps": [
+      "verify_source()で医療情報ネットの2つのzipのSHA-256をSHA256SUMSと照合",
+      "zip内CSV(UTF-8 BOM付き)を読み、緯度経度が日本の範囲内の行だけを参照点として採る(0.0/0.0のセンチネルを除外)",
+      "(都道府県コード, 正規化名)で索引を作る",
+      "各医療機関について、同一都道府県内の正規化名完全一致候補を市区町村整合で絞り、1件だけの場合のみ参照として同定する",
+      "付与済み座標と参照座標の大円距離(haversine)を計算し、agree/minor_gap/conflictに区分する",
+      "参照座標が落ちる構想区域を点-多角形判定で求め、原典の区域と一致するかを列として残す"
+    ],
+    "caveat": "参照した医療情報ネットの座標は厚労省の公表値だが、出典ページ自身が「最新でない情報や報告誤りの可能性」を明記している。したがって distance_m が大きいことは「付与済み座標が誤っている」ことの証明ではなく、「2つの公表物が異なる位置を示している」ことの記録である。また参照側の座標欠測は空欄ではなく 0.0/0.0 で表現されるため、日本の緯度経度の範囲内かで判定して除外している。"
+  },
+  "fields": {
+    "record_id": "医療機関の識別子(facility_basic.csvと同じ。R7-<区域コード>-<原典行番号>。恒久IDではない)",
+    "pref_code": "都道府県コード(ゼロ埋め2桁)",
+    "pref_name": "都道府県名",
+    "area_code": "構想区域コード(ゼロ埋め4桁)",
+    "area_name": "構想区域名",
+    "facility_name": "医療機関名(原典表記のまま)",
+    "municipality": "所在地の市区町村(原典表記のまま。病床機能報告が未報告の施設は空)",
+    "linkage_match_status": "facility_geo_linkage.csvのmatch_status(matched/candidate_only/unmatched)",
+    "linkage_match_method": "同 match_method(normalized_exact/normalized_suffix/空)",
+    "current_longitude": "現在この可視化サイトが使っている経度(P04由来。座標が無い施設は空)",
+    "current_latitude": "同 緯度",
+    "reference_status": "参照(医療情報ネット)側の同定結果。unique=同一都道府県内で正規化名が完全一致し市区町村も整合する参照が1件 / unique_municipality_unverified=参照は1件だが、原典側の所在地欄が空(病床機能報告が未報告)のため市区町村を検証できない / municipality_mismatch=名称一致の参照はあるが市区町村が整合しない / ambiguous=名称一致の参照が複数あり一意に絞れない / none=同一都道府県内に正規化名が完全一致する参照が無い",
+    "reference_kind": "参照側の区分(病院/診療所)。同定できなかった場合は空",
+    "reference_id": "参照側のID(医療情報ネットのID。恒久IDではない)",
+    "reference_name": "参照側の正式名称",
+    "reference_address": "参照側の所在地(都道府県名から始まる完全な住所)",
+    "reference_longitude": "参照側の公表経度",
+    "reference_latitude": "参照側の公表緯度",
+    "reference_area_code": "参照座標が落ちる構想区域コード(area_boundaries_R7.geojsonでの点-多角形判定。どの区域にも属さない場合は空)",
+    "distance_m": "現在の座標と参照座標の距離(メートル、小数1桁。どちらかが無い場合は空)",
+    "audit_status": "監査結果。agree=付与済み座標と参照座標が100m未満で一致 / minor_gap=100m以上1000m未満の差 / conflict=1000m以上離れている(付与済み座標が疑わしい) / no_reference=座標は付与済みだが、参照側で一意に確認できず検算できない / missing_with_reference=座標が無く、参照側には一意の公表座標がある / missing_without_reference=座標が無く、参照側でも一意に確認できない"
+  },
+  "known_issues": [
+    {
+      "id": "facility_coordinate_conflicts_with_published_reference",
+      "scope": {
+        "csv": "facility_geo_audit.csv",
+        "columns": [
+          "distance_m",
+          "audit_status"
+        ],
+        "audit_status": "conflict"
+      },
+      "summary": "医療機関76件で、国土数値情報P04-20(令和2年度)由来の付与済み座標と、医療情報ネット(2025-06-01時点)の公表座標が1000m以上離れている。厚労省の2つの公表物が同一名称の医療機関について異なる位置を示している状態で、どちらが正しいかは公表物からは決められない。",
+      "evidence": [
+        "検算できた7899件のうち76件が1000m以上離れている(最大32,391m、次点20,452m)",
+        "76件のうち参照座標が原典の言う構想区域の外に落ちるものは0件",
+        "住所を突き合わせると、両者が実質同一の住所を指しているのに座標だけが数km離れている例が複数ある(例: 産科・婦人科久米クリニックは双方とも「いちき串木野市曙町」だが座標は約32km離れている)。この場合は移転ではなく、いずれかの座標そのものが誤っている",
+        "一方で住所自体が異なる例もある(例: 峯苫医院はP04「八代市坂本町坂本」対 参照「八代市渡町」)。令和2年度と2025年の5年間の移転と解釈できる"
+      ],
+      "action": "値は補正しない(参照側の座標を採用することは、座標源の統合という未決の要件変更に当たる。doc/DECISION_FACILITY_COORDINATES.md 参照)。一方で、検算で否定された座標を地図に出し続けることは「誤った位置に医療機関が表示される」ことを意味するため、表示用データセット(area_facilities_R7.json)ではこの該当施設の座標を出力せず、一覧には「地図に表示なし」として全項目とともに残す。監査の全記録はfacility_geo_audit.csvにある"
+    }
+  ],
+  "row_count": 11760
+}

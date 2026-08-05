@@ -17,6 +17,7 @@ SHA256SUMS text eol=lf
 doc/JOIN_VERIFICATION.md text eol=lf
 doc/FACILITY_LINKAGE.md text eol=lf
 doc/YOY_VERIFICATION.md text eol=lf
+doc/FACILITY_GEO_AUDIT.md text eol=lf
 
 *.xlsx binary
 *.pdf binary

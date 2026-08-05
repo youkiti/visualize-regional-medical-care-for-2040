@@ -33,6 +33,9 @@ import type {
   FlowDirectionKey,
   FlowPhaseKey,
   MetricKind,
+  PrefectureIndicator,
+  PrefectureIndicatorsData,
+  PrefectureIndicatorsMetadata,
   YoyMetricKind,
 } from '../types';
 
@@ -783,5 +786,320 @@ export function buildAreaFlowCsv(args: BuildAreaFlowCsvArgs): DownloadCsv {
   return {
     filename: `area_flow_${area.area_code}_${direction}_${phase}_R7.csv`,
     text: toCsvText(FLOW_HEADER, rows, { preamble }),
+  };
+}
+
+// ---- 2-5/2-6. 都道府県層（概観レイヤ）のCSV ---------------------------------
+//
+// 上の 2-1（buildAreaTableCsv）・2-2（buildAreaDetailCsv）の都道府県版。区域側の
+// 関数を level で分岐させるのではなく別関数にしてあるのは、データセットの形が
+// そもそも違うため（prefecture_indicators_R7.json は病床と需要が1つのオブジェクトに
+// 同居し、metadataは `source` ではなく source_beds / source_demand の2ブロック。
+// CLAUDE.md「可視化実装で判明した罠」11）。
+//
+// published_fy は PUBLISHED_FY（'R7'）固定でよい。都道府県層のデータセットは
+// 病床・需要ともR7単独公表分で、区域側の年度間比較（buildYoyAreaTableCsv）のように
+// 行ごとにR6/R7が混ざることがない。
+
+/**
+ * 全国（pref_code='00'）を行に含めない理由。出力条件行に必ず入れる。
+ * 47都道府県と同じ列に並べると、利用者が actual_2025 等を合計したときに
+ * 二重計上になる（画面のパネルは「（参考）」と畳んで区別しているが、CSVには
+ * 畳む仕組みが無い）。
+ */
+const NATIONAL_EXCLUDED_NOTE = '全国（pref_code=00）は含まない。47都道府県と合計すると二重計上になるため';
+
+/**
+ * 都道府県層で年度間比較（yoy）指標が選ばれたときのエラー文言。
+ * prefecture_indicators_R7.json は病床と需要しか持たず、都道府県層の
+ * 年度間比較データセットは未作成（Controls側でボタンを無効化しているので、
+ * 通常この経路には来ない）。
+ */
+const PREF_YOY_UNSUPPORTED = '年度間比較（R6→R7）の都道府県層データセットは未作成です';
+
+/**
+ * 都道府県の需要・基準人口が派生値であることを、行の真横（note列）でも言うための文言。
+ * preambleのknown_issue引用（prefectureDerivedCaveatLines）と重複するが、
+ * CLAUDE.md 罠25「派生であることは値の真横にも注記を置く」に従う。CSVでの"真横"は列。
+ */
+const PREF_DERIVED_NOTE = '構想区域の値を本サイトが合計した派生値（厚生労働省の都道府県別公表値ではない）';
+
+/** 都道府県識別列（全CSV共通の先頭4列: published_fy, pref_code, pref_name, area_count）。 */
+function prefIdColumns(pref: PrefectureIndicator): CsvValue[] {
+  return [PUBLISHED_FY, pref.pref_code, pref.pref_name, pref.area_count];
+}
+
+/**
+ * prefecture_indicators_R7.json の known_issues から「医療需要推計と基準人口は
+ * 本リポジトリが構想区域から合計した派生値」の1件を取り出し、preamble の注記行
+ * 1本に畳む。文言はハードコードせず metadata から引く
+ * （CLAUDE.md「原典側の欠陥の記録先」。区域側の findYoyActualFromR6Issue と同じ作り）。
+ */
+function prefectureDerivedCaveatLines(metadata: PrefectureIndicatorsMetadata): string[] {
+  const issue = metadata.known_issues.find((i) => i.id === 'prefecture_demand_aggregated_by_this_repository');
+  return issue ? [`注記（医療需要・基準人口が派生値であること）: ${issue.summary}／${issue.action}`] : [];
+}
+
+// ---- 2-5. buildPrefectureTableCsv: 全47都道府県 × 現在の指標 ---------------
+
+export interface BuildPrefectureTableCsvArgs {
+  prefectures: PrefectureIndicatorsData;
+  metric: MetricKind;
+  bedFunction: BedFunctionKey;
+  year: number;
+}
+
+/**
+ * 全47都道府県 × 現在選択中の指標（都道府県表示中の地図に出ている内容）を1CSVにする。
+ * 全国（pref_code='00'）は含まない（NATIONAL_EXCLUDED_NOTE 参照）。
+ *
+ * 年度間比較（yoy）指標では throw する。都道府県層にはそのデータセットが無く、
+ * 代わりに339構想区域のCSVを出すと「表示中のデータ」と中身が食い違うため
+ * （Controls がこの組み合わせでボタンを無効化しており、ここは防御）。
+ */
+export function buildPrefectureTableCsv(args: BuildPrefectureTableCsvArgs): DownloadCsv {
+  const { prefectures, metric, bedFunction, year } = args;
+
+  if (isYoyMetric(metric)) {
+    throw new Error(`buildPrefectureTableCsv: ${PREF_YOY_UNSUPPORTED}（metric=${metric}）`);
+  }
+  if (isDemandMetric(metric)) {
+    return buildDemandPrefectureTableCsv(prefectures, metric, year);
+  }
+  return buildBedPrefectureTableCsv(prefectures, metric, bedFunction);
+}
+
+function buildBedPrefectureTableCsv(
+  data: PrefectureIndicatorsData,
+  metric: BedMetricKind,
+  bedFunction: BedFunctionKey
+): DownloadCsv {
+  const bedFunctionLabel = data.function_labels[bedFunction];
+  const header = [
+    'published_fy',
+    'pref_code',
+    'pref_name',
+    'area_count',
+    'bed_function',
+    'actual_2025',
+    'need_2025',
+    'diff',
+    'ratio',
+    'note',
+  ];
+  const rows: CsvValue[][] = data.prefectures.map((pref) => {
+    const beds = pref.beds[bedFunction];
+    const ratio = computeRatio(beds.actual_2025, beds.need_2025);
+    return [
+      ...prefIdColumns(pref),
+      bedFunctionLabel,
+      beds.actual_2025,
+      beds.need_2025,
+      beds.actual_2025 - beds.need_2025,
+      ratio === null ? null : round4(ratio),
+      ratio === null ? RATIO_UNAVAILABLE_NOTE : '',
+    ];
+  });
+
+  const condition = `指標=${BED_METRIC_LABELS[metric]}（${BED_METRIC_DESCRIPTIONS[metric]}）, 病床機能=${bedFunctionLabel}, 対象=全${data.prefectures.length}都道府県（${NATIONAL_EXCLUDED_NOTE}）`;
+  // 病床は厚生労働省の都道府県別公表値そのものなので source_beds だけでよい
+  // （需要側の出典・派生値の注記は足さない。このCSVは需要の列を持たない）。
+  const preamble = buildPreamble({
+    source: data.metadata.source_beds,
+    condition,
+    caveat: data.metadata.processing.caveat.beds,
+  });
+
+  return {
+    filename: `prefecture_beds_${metric}_${bedFunction}_2025_R7.csv`,
+    text: toCsvText(header, rows, { preamble }),
+  };
+}
+
+function buildDemandPrefectureTableCsv(
+  data: PrefectureIndicatorsData,
+  metric: DemandMetricKind,
+  year: number
+): DownloadCsv {
+  const category = demandCategoryOf(metric);
+  const categoryLabel = data.category_labels[category];
+  const header = [
+    'published_fy',
+    'pref_code',
+    'pref_name',
+    'area_count',
+    'demand_category',
+    'year',
+    'year_label',
+    'receipts_per_month',
+    'baseline_2024',
+    'ratio_to_2024',
+    'note',
+  ];
+  const yearKey = String(year);
+  const baselineKey = String(data.baseline_year);
+  const rows: CsvValue[][] = data.prefectures.map((pref) => {
+    const value = pref.demand[category][yearKey];
+    const baseline = pref.demand[category][baselineKey];
+    return [
+      ...prefIdColumns(pref),
+      categoryLabel,
+      year,
+      data.year_labels[yearKey],
+      value,
+      baseline,
+      round4(value / baseline),
+      PREF_DERIVED_NOTE,
+    ];
+  });
+
+  const condition = `指標=${DEMAND_METRIC_LABELS[metric]}（レセプト件数/月・2024年度比）, 年度=${year}年度, 対象=全${data.prefectures.length}都道府県（${NATIONAL_EXCLUDED_NOTE}）`;
+  const preamble = buildPreamble({
+    source: data.metadata.source_demand,
+    condition,
+    caveat: data.metadata.processing.caveat.demand_forecast,
+    extraCaveatLines: prefectureDerivedCaveatLines(data.metadata),
+  });
+
+  return {
+    filename: `prefecture_demand_${category}_${year}_R7.csv`,
+    text: toCsvText(header, rows, { preamble }),
+  };
+}
+
+// ---- 2-6. buildPrefectureDetailCsv: 選択都道府県1つの指標（long形式） -------
+
+const PREFECTURE_DETAIL_HEADER = [
+  'published_fy',
+  'pref_code',
+  'pref_name',
+  'area_count',
+  'dataset',
+  'category',
+  'series',
+  'year',
+  'value',
+  'unit',
+  'note',
+];
+
+export interface BuildPrefectureDetailCsvArgs {
+  prefecture: PrefectureIndicator;
+  metadata: PrefectureIndicatorsMetadata;
+  functions: BedFunctionKey[];
+  functionLabels: Record<BedFunctionKey, string>;
+  demandCategories: DemandCategoryKey[];
+  demandCategoryLabels: Record<DemandCategoryKey, string>;
+  demandYears: number[];
+  demandYearLabels: Record<string, string>;
+  baselineYear: number;
+}
+
+/**
+ * 選択中の都道府県1つの指標をlong形式（1行=1事実）で出す。dataset=basic/beds/demand の
+ * 3種の行を持つ（区域側 buildAreaDetailCsv の yoy 相当は都道府県層に無い）。
+ * 全国（pref_code='00'）の行は含まない — 対象は選択中の1都道府県のみ。
+ *
+ * 値の由来が行によって違う（病床・2020年人口・面積は厚生労働省の都道府県別公表値、
+ * 需要と基準人口/2040年人口は構想区域からの合計）ため、派生の行だけ note 列に
+ * PREF_DERIVED_NOTE を入れて区別する。
+ */
+export function buildPrefectureDetailCsv(args: BuildPrefectureDetailCsvArgs): DownloadCsv {
+  const {
+    prefecture,
+    metadata,
+    functions,
+    functionLabels,
+    demandCategories,
+    demandCategoryLabels,
+    demandYears,
+    demandYearLabels,
+    baselineYear,
+  } = args;
+
+  const idCols = prefIdColumns(prefecture);
+  const rows: CsvValue[][] = [];
+
+  // dataset=basic。population_2020・area_km2 は prefecture_basic.csv 由来の
+  // 公表値そのものなので note は空、population_2024/2040 は構想区域の合計なので
+  // PREF_DERIVED_NOTE を付ける（metadata.fields の説明と一致させてある）。
+  rows.push([...idCols, 'basic', BASIC_CATEGORY_LABEL, '人口（2020年国勢調査）', 2020, prefecture.population_2020, '人', '']);
+  rows.push([...idCols, 'basic', BASIC_CATEGORY_LABEL, '面積', null, prefecture.area_km2, 'km2', '']);
+  rows.push([
+    ...idCols,
+    'basic',
+    BASIC_CATEGORY_LABEL,
+    '人口（医療需要推計の基準人口）',
+    null,
+    prefecture.population_2024,
+    '人',
+    `${PREF_DERIVED_NOTE}／${BASELINE_POPULATION_NOTE}`,
+  ]);
+  rows.push([
+    ...idCols,
+    'basic',
+    BASIC_CATEGORY_LABEL,
+    '人口（2040年推計）',
+    2040,
+    prefecture.population_2040,
+    '人',
+    PREF_DERIVED_NOTE,
+  ]);
+
+  // dataset=beds（厚生労働省の都道府県別公表値そのもの。区域からの合計ではない）
+  for (const fn of functions) {
+    const label = functionLabels[fn];
+    const beds = prefecture.beds[fn];
+    const ratio = computeRatio(beds.actual_2025, beds.need_2025);
+    rows.push([...idCols, 'beds', label, '実績', 2025, beds.actual_2025, '床', '']);
+    rows.push([...idCols, 'beds', label, '必要数', 2025, beds.need_2025, '床', '']);
+    rows.push([...idCols, 'beds', label, '差（実績−必要数）', 2025, beds.actual_2025 - beds.need_2025, '床', '']);
+    rows.push([
+      ...idCols,
+      'beds',
+      label,
+      '比（実績/必要数）',
+      2025,
+      ratio === null ? null : round4(ratio),
+      '',
+      ratio === null ? RATIO_UNAVAILABLE_NOTE : '',
+    ]);
+  }
+
+  // dataset=demand（構想区域からの合計＝派生値。区域側と違い note に年度ラベルと
+  // 派生である旨の両方を入れる）
+  const baselineKey = String(baselineYear);
+  for (const category of demandCategories) {
+    const categoryLabel = demandCategoryLabels[category];
+    const baseline = prefecture.demand[category][baselineKey];
+    for (const year of demandYears) {
+      const yearKey = String(year);
+      const value = prefecture.demand[category][yearKey];
+      const yearNote = `${demandYearLabels[yearKey]}／${PREF_DERIVED_NOTE}`;
+      rows.push([...idCols, 'demand', categoryLabel, 'レセプト件数/月', year, value, '件/月', yearNote]);
+      const ratioToBaseline = year === baselineYear ? 1 : round4(value / baseline);
+      rows.push([...idCols, 'demand', categoryLabel, '2024年度比', year, ratioToBaseline, '', yearNote]);
+    }
+  }
+
+  const condition = `対象=都道府県 ${prefecture.pref_code} ${prefecture.pref_name}（構想区域 ${prefecture.area_count} 区域）`;
+  // このCSVは病床と需要の両方を含むため、主出典を病床側(source_beds)にして
+  // 需要側(source_demand)を追加の出典行として並べる（区域側は病床と需要で
+  // ファイルが分かれているため、この形になるのは都道府県層だけ）。
+  const demandSource = metadata.source_demand;
+  const preamble = buildPreamble({
+    source: metadata.source_beds,
+    condition,
+    caveat: metadata.processing.caveat.beds,
+    extraSourceLine: `医療需要推計の原典ファイル: ${demandSource.source_file}（SHA-256: ${demandSource.source_sha256}） / 掲載ページ: ${demandSource.page_url}`,
+    extraCaveatLines: [
+      `注記（医療需要推計）: ${metadata.processing.caveat.demand_forecast} ${metadata.processing.caveat.demand_population}`,
+      ...prefectureDerivedCaveatLines(metadata),
+    ],
+  });
+
+  return {
+    filename: `prefecture_${prefecture.pref_code}_indicators_R7.csv`,
+    text: toCsvText(PREFECTURE_DETAIL_HEADER, rows, { preamble }),
   };
 }

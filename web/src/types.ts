@@ -358,10 +358,20 @@ export interface Facility {
   value_status: FacilityValueStatus[];
   /** 該当する機能が無い施設ではキー自体が省略される（0件を意味する空配列にはしない）。 */
   functions?: string[];
-  /** 'matched'=座標あり / 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。 */
+  /**
+   * P04名寄せの結果そのもの。'matched'=名寄せでは座標が付いた /
+   * 'candidate_only'・'unmatched'=座標なし（位置の推測はしない、doc/REQUIREMENTS.md §4.3）。
+   * **match_status==='matched' でも coordinates を持つとは限らない**（下記 coordinate_withdrawn）。
+   */
   match_status: FacilityMatchStatus;
-  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' のときのみ存在する。 */
+  /** [経度, 緯度]（度、JGD2011）。match_status==='matched' かつ検算で取り下げていない施設のみ存在する。 */
   coordinates?: [number, number];
+  /**
+   * trueなら、P04名寄せでは座標が付いたが、医療情報ネットの公表座標との検算で1km以上
+   * 離れていた（doc/FACILITY_GEO_AUDIT.md）ため座標を出していないことを表す。
+   * 該当しない施設ではキー自体が省略される。座標を「補正した」のではなく「出さない」措置。
+   */
+  coordinate_withdrawn?: boolean;
 }
 
 /** web/public/facilities/<area_code>.json の形。区域選択時に個別取得する（バンドルしない）。 */
@@ -371,7 +381,10 @@ export interface FacilityShard {
   pref_code: string;
   pref_name: string;
   facility_count: number;
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
   geocoded_count: number;
+  /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
+  coordinate_withdrawn_count: number;
   facilities: Facility[];
 }
 
@@ -379,7 +392,10 @@ export interface FacilityShard {
 export interface FacilitySummaryArea {
   area_code: string;
   facility_count: number;
+  /** 実際に地図へ点として出る施設数（検算で取り下げた施設は含まない）。 */
   geocoded_count: number;
+  /** 検算（doc/FACILITY_GEO_AUDIT.md）で座標を取り下げた施設数。 */
+  coordinate_withdrawn_count: number;
 }
 
 /** facility_basic/facility_observations/facility_functionsの3CSV共通の出典（R7/001723127.xlsx由来）。 */
@@ -463,7 +479,7 @@ export interface DownloadManifestBundle {
   sha256: string;
   /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
   entry_count: number;
-  /** ZIP内のCSV本数（16）。entry_countとは別に持つ: UIの「CSV16本＋…」表記に使う。 */
+  /** ZIP内のCSV本数（17）。entry_countとは別に持つ: UIの「CSV17本＋…」表記に使う。 */
   csv_count: number;
 }
 

@@ -202,10 +202,14 @@ a {
   background: var(--color-panel-bg);
 }
 
-.controls button:hover {
+.controls button:hover:not(:disabled) {
   background: #eeeeea;
 }
 
+/* buttonも含める（.download-button と同じ扱い）。都道府県表示×年度間比較の
+   ようにボタンが無効になる組み合わせがあり、見た目が有効時と同じままだと
+   「押せるのに何も起きない」ように見える（理由はtitleに出している）。 */
+.controls button:disabled,
 .controls select:disabled,
 .controls input:disabled {
   opacity: 0.5;
@@ -902,6 +906,15 @@ tr.facility-detail-row td {
   color: var(--color-text-tertiary);
   line-height: 1.5;
   margin: 4px 0 0 0;
+}
+
+/* 座標カバレッジ（点の数を施設数と読み違えさせないための常設表示、M10）。
+   凡例注記より一段強く出す（注記ではなく、地図の読み方の前提のため）。 */
+.facility-coverage-note {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 8px 0 0 0;
 }
 
 /* 年度間比較テーブル（区域パネル、M9）。6列（病床機能＋数値5列）を
