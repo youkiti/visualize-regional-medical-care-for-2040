@@ -1,8 +1,9 @@
 // Reads data/processed/area_indicators_R7.json,
 // data/processed/area_demand_R7.json,
-// data/processed/area_boundaries_R7.geojson and
+// data/processed/area_boundaries_R7.geojson,
 // data/processed/area_facilities_R7.json (the single source of truth,
-// owned by the Python pipeline — see CLAUDE.md) and writes the generated
+// owned by the Python pipeline — see CLAUDE.md) and the 13 tidy CSVs +
+// .meta.json files under data/processed/, and writes the generated
 // artifacts the frontend bundles/fetches:
 //
 //   web/src/generated/area_indicators.json    — verbatim copy
@@ -19,6 +20,14 @@
 //                                                area is selected (not bundled — see the
 //                                                design note above the facility-shard
 //                                                section below)
+//   web/public/downloads/<bundle>.zip         — the 13 processed CSVs (+ their
+//                                                .meta.json + README.md + MANIFEST.tsv)
+//                                                packed as one bulk-download archive
+//   web/public/downloads/area_boundaries_R7.geojson — verbatim copy, for standalone
+//                                                map-tool use (not packed into the zip)
+//   web/src/generated/download_manifest.json  — bundled, lightweight (size/sha256/
+//                                                member list) so the UI can describe
+//                                                the bulk download without fetching it
 //
 // Run via `npm run sync-data` (also wired into predev/prebuild). Exits
 // non-zero on any consistency failure so a broken data pipeline fails the
@@ -27,9 +36,12 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 
 import { buildAreaMap, buildAreaIndex, demandValueKey, demandRatioKey, BED_FUNCTIONS } from './lib/merge.mjs';
 import { buildAreaShard, buildFacilitySummary, shardFileName } from './lib/facilities.mjs';
+import { createZip, readZip } from './lib/zip.mjs';
+import { BUNDLE_ROOT, BUNDLE_FILE_NAME, BUNDLE_CSV_FILES, buildManifestTsv, buildBundleReadme } from './lib/bundle.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,8 +52,13 @@ const indicatorsPath = path.join(repoRoot, 'data', 'processed', 'area_indicators
 const demandPath = path.join(repoRoot, 'data', 'processed', 'area_demand_R7.json');
 const boundariesPath = path.join(repoRoot, 'data', 'processed', 'area_boundaries_R7.geojson');
 const facilitiesPath = path.join(repoRoot, 'data', 'processed', 'area_facilities_R7.json');
+const processedDir = path.join(repoRoot, 'data', 'processed');
 const generatedDir = path.join(webDir, 'src', 'generated');
 const facilitiesOutDir = path.join(webDir, 'public', 'facilities');
+const downloadsOutDir = path.join(webDir, 'public', 'downloads');
+
+// リポジトリの正本URL。README.md記載のURLと揃える（.git無し）。
+const REPO_URL = 'https://github.com/youkiti/visualize-regional-medical-care-for-2040';
 
 const EXPECTED_FEATURE_COUNT = 339;
 const EXPECTED_FACILITY_TOTAL = 11760;
@@ -62,6 +79,45 @@ function readJson(filePath, label) {
   } catch (err) {
     fail(`${label} is not valid JSON (${filePath}): ${err.message}`);
     throw err; // unreachable, keeps TS/JS control-flow analysis happy
+  }
+}
+
+/**
+ * createZip() が書いたZIPバッファを readZip() で読み直し、渡された元データ
+ * (sourceEntries)とバイト一致すること・エントリ数が一致することを検証する。
+ * 自前のZIP実装（web/scripts/lib/zip.mjs）を書きっぱなしにしないための検証
+ * ステップ。不一致はすべて fail() で中断する。
+ *
+ * @param {Buffer} zipBuf
+ * @param {{name: string, data: Buffer}[]} sourceEntries createZip()へ渡したのと同じ配列
+ */
+function verifyZip(zipBuf, sourceEntries) {
+  const readEntries = readZip(zipBuf);
+
+  if (readEntries.length !== sourceEntries.length) {
+    fail(`verifyZip: entry count mismatch: zip has ${readEntries.length}, expected ${sourceEntries.length}`);
+  }
+
+  const sourceByName = new Map(sourceEntries.map((e) => [e.name, e.data]));
+  const seenNames = new Set();
+
+  for (const entry of readEntries) {
+    if (seenNames.has(entry.name)) {
+      fail(`verifyZip: duplicate entry name in central directory: ${entry.name}`);
+    }
+    seenNames.add(entry.name);
+
+    const expected = sourceByName.get(entry.name);
+    if (!expected) {
+      fail(`verifyZip: entry ${entry.name} not found among source entries`);
+    } else if (!entry.data.equals(expected)) {
+      fail(`verifyZip: extracted bytes for ${entry.name} do not match the source buffer`);
+    }
+  }
+
+  const missingNames = [...sourceByName.keys()].filter((n) => !seenNames.has(n));
+  if (missingNames.length > 0) {
+    fail(`verifyZip: entries missing from the written zip: ${JSON.stringify(missingNames)}`);
   }
 }
 
@@ -405,6 +461,126 @@ function main() {
       `(total ${totalShardBytes.toLocaleString('en-US')} bytes, max ${maxShardBytes.toLocaleString('en-US')} bytes) ` +
       `to ${path.relative(repoRoot, facilitiesOutDir)} and facility_summary.json ` +
       `(${facilitySummary.areas.length} areas) to ${path.relative(repoRoot, generatedDir)}`
+  );
+
+  // 6. web/public/downloads/<BUNDLE_FILE_NAME> — data/processed/ の加工済み
+  //    CSV13本を1本のZIPにまとめた一括ダウンロード配布物。web/public/facilities/
+  //    と同じ理由でディレクトリを一掃してから作り直す(収録物が減ったときに
+  //    古いファイルがdistへ残らないようにするため)。
+  fs.rmSync(downloadsOutDir, { recursive: true, force: true });
+  fs.mkdirSync(downloadsOutDir, { recursive: true });
+
+  // BUNDLE_CSV_FILES(web/scripts/lib/bundle.mjs)と実際のdata/processed/*.csvの
+  // 一覧を突合する。食い違ったら中断する(新しいCSVが増えたときに黙って配布物
+  // から漏れる/意図しないファイルが混ざるのを防ぐため)。
+  const actualCsvFiles = fs
+    .readdirSync(processedDir)
+    .filter((name) => name.endsWith('.csv'))
+    .sort();
+  const expectedCsvFiles = [...BUNDLE_CSV_FILES].sort();
+  if (JSON.stringify(actualCsvFiles) !== JSON.stringify(expectedCsvFiles)) {
+    fail(
+      'BUNDLE_CSV_FILES (web/scripts/lib/bundle.mjs) does not match data/processed/*.csv. ' +
+        `expected=${JSON.stringify(expectedCsvFiles)} actual=${JSON.stringify(actualCsvFiles)}`
+    );
+  }
+
+  // 各CSVとその<csv>.meta.jsonを読み、SHA-256を計算してZIPエントリ・
+  // MANIFEST.tsv・README.md・download_manifest.jsonの材料を組み立てる。
+  // CSVの中身は正本のバイト列をそのまま格納する(BOM付与・改行変換はしない。
+  // ZIP内のCSVのSHA-256がdata/processed/のそれと一致することが真正性の担保)。
+  const zipEntries = [];
+  const manifestMembers = [];
+  const readmeFiles = [];
+  const downloadManifestMembers = [];
+
+  for (const csvName of BUNDLE_CSV_FILES) {
+    const csvPath = path.join(processedDir, csvName);
+    const metaPath = `${csvPath}.meta.json`;
+    const csvBuf = fs.readFileSync(csvPath);
+    const meta = readJson(metaPath, `${csvName}.meta.json`).data;
+    const csvSha256 = crypto.createHash('sha256').update(csvBuf).digest('hex');
+
+    zipEntries.push({ name: `${BUNDLE_ROOT}/${csvName}`, data: csvBuf });
+    manifestMembers.push({ name: csvName, bytes: csvBuf.length, sha256: csvSha256, rows: meta.row_count });
+    readmeFiles.push({
+      name: csvName,
+      title: meta.title,
+      rows: meta.row_count,
+      source: meta.source,
+      known_issues: meta.known_issues,
+    });
+    downloadManifestMembers.push({
+      name: csvName,
+      title: meta.title,
+      bytes: csvBuf.length,
+      rows: meta.row_count,
+      sha256: csvSha256,
+    });
+
+    const metaBuf = fs.readFileSync(metaPath);
+    const metaSha256 = crypto.createHash('sha256').update(metaBuf).digest('hex');
+    zipEntries.push({ name: `${BUNDLE_ROOT}/${csvName}.meta.json`, data: metaBuf });
+    manifestMembers.push({ name: `${csvName}.meta.json`, bytes: metaBuf.length, sha256: metaSha256, rows: '' });
+  }
+
+  const readmeBuf = Buffer.from(buildBundleReadme({ repoUrl: REPO_URL, files: readmeFiles }), 'utf8');
+  zipEntries.push({ name: `${BUNDLE_ROOT}/README.md`, data: readmeBuf });
+
+  const manifestBuf = Buffer.from(buildManifestTsv(manifestMembers), 'utf8');
+  zipEntries.push({ name: `${BUNDLE_ROOT}/MANIFEST.tsv`, data: manifestBuf });
+
+  let zipBuf;
+  try {
+    zipBuf = createZip(zipEntries);
+  } catch (err) {
+    fail(`createZip failed: ${err.message}`);
+    return; // unreachable
+  }
+
+  // 書きっぱなしにしない: 自前のZIP実装なので、書いたバッファを読み直して
+  // 各エントリが元データとバイト一致することを検証する。
+  verifyZip(zipBuf, zipEntries);
+
+  const bundlePath = path.join(downloadsOutDir, BUNDLE_FILE_NAME);
+  fs.writeFileSync(bundlePath, zipBuf);
+  const bundleSha256 = crypto.createHash('sha256').update(zipBuf).digest('hex');
+
+  // 7. web/public/downloads/area_boundaries_R7.geojson — ZIPには入れず単体で
+  //    コピーする(地図ツール等での単体利用のため)。
+  const boundariesBuf = fs.readFileSync(boundariesPath);
+  fs.writeFileSync(path.join(downloadsOutDir, 'area_boundaries_R7.geojson'), boundariesBuf);
+  const boundariesSha256 = crypto.createHash('sha256').update(boundariesBuf).digest('hex');
+
+  // 8. web/src/generated/download_manifest.json — UIがサイズ・SHA-256・収録物
+  //    を表示するための軽量な一覧(bundle実体を取得しなくても内容を説明できる
+  //    ようにする)。membersは13本のCSVのみ(meta.jsonは含めない)。
+  const downloadManifest = {
+    bundle: {
+      file: BUNDLE_FILE_NAME,
+      bytes: zipBuf.length,
+      sha256: bundleSha256,
+      entry_count: zipEntries.length,
+      csv_count: BUNDLE_CSV_FILES.length,
+    },
+    boundaries: {
+      file: 'area_boundaries_R7.geojson',
+      bytes: boundariesBuf.length,
+      sha256: boundariesSha256,
+    },
+    members: downloadManifestMembers,
+  };
+  fs.writeFileSync(
+    path.join(generatedDir, 'download_manifest.json'),
+    `${JSON.stringify(downloadManifest, null, 2)}\n`
+  );
+
+  console.log(
+    `[sync-data] OK: wrote ${BUNDLE_FILE_NAME} ` +
+      `(${zipBuf.length.toLocaleString('en-US')} bytes, ${zipEntries.length} entries) and ` +
+      `area_boundaries_R7.geojson (${boundariesBuf.length.toLocaleString('en-US')} bytes) ` +
+      `to ${path.relative(repoRoot, downloadsOutDir)}; wrote download_manifest.json ` +
+      `(${downloadManifest.members.length} CSV members) to ${path.relative(repoRoot, generatedDir)}`
   );
 }
 
