@@ -55,7 +55,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### web/ — 可視化サイト
 
-`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）と `data/processed/area_boundaries_R7.geojson` を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）と `web/public/facilities/`（同じくGit管理外）へ表示用データを合成する:
+`data/processed/area_indicators_R7.json`（`tools/build_web_data.py` が生成、339構想区域の2025年実績vs2025年必要数）・`data/processed/area_demand_R7.json`（`tools/build_web_demand.py` が生成、339構想区域×2区分×6年度の医療需要推計）・`data/processed/area_facilities_R7.json`（`tools/build_web_facilities.py` が生成、11,760医療機関×21指標）・`data/processed/area_boundaries_R7.geojson`、および加工済みCSV13本＋各`.meta.json`（`data/processed/*.csv`。一覧は `web/scripts/lib/bundle.mjs` の `BUNDLE_CSV_FILES` が持つ）を正本として、`web/scripts/sync-data.mjs` が `web/src/generated/`（**Git管理外**、`predev`/`prebuild` から自動実行）・`web/public/facilities/`・`web/public/downloads/`（いずれも同じくGit管理外）へ表示用データを合成する:
 
 | 生成物 | 用途 |
 |---|---|
@@ -65,6 +65,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `area_index.json` | 選択・bbox解決用の軽量インデックス（`area_code`・`boundary_source`・bboxのみ）。**バンドルに取り込み**、地図の表示状態に依存せず区域選択を解決する |
 | `facility_summary.json` | 医療機関の区域別件数＋21指標の定義＋`value_status` のラベル＋出典（約38KB）。**バンドルに取り込み**、shard取得前でも件数を出せるようにし、出典欄と指標ラベルの正本にする |
 | `public/facilities/<区域コード>.json` × 339 | 区域ごとの医療機関の全データ（21指標＋機能＋座標）。**バンドルせず、区域を選んだときに1本だけfetchする**（合計6.8MB・gzipで中央値2.2KB／最大24KB） |
+| `public/downloads/chiiki-iryo-koso_processed-csv_R7.zip` | 加工済みCSV13本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv`（計28エントリ・約2.3MB）。**バンドルせず、リンクからブラウザに直接ダウンロードさせる** |
+| `public/downloads/area_boundaries_R7.geojson` | 正本の忠実コピー（単体利用向け。ZIPには入れない） |
+| `src/generated/download_manifest.json` | ZIP/GeoJSONのサイズ・SHA-256・収録CSV一覧（約3.9KB）。**バンドルに取り込み**、一括DLセクションの表示に使う |
 
 正本は `data/processed/` の1箇所のみ。`data/processed/` を再生成したら `sync-data`（＝`predev`/`prebuild`）が自動で追随する。
 
@@ -187,6 +190,12 @@ npm run typecheck  # tsc --noEmit のみ
 14. **区域切替の競合状態は `AbortController` だけでは潰せない**（M5後半）: (a) キャッシュヒット時はそもそも fetch が起きず、(b) `abort()` 時点でネットワーク取得が既に完了していれば `.then` が先に解決しうる。**応答を反映する直前に「今も同じ区域が選ばれているか」を確認する**こと（`facilityShard.ts` の `createFacilityShardLoader`）。この判定を React から切り離した純関数の状態機械にしておくと、jsdom無しの vitest でもテストできる。
 15. **HTMLテーブルの展開行は他の行と列幅を共有する**（M5後半）: 施設一覧の折りたたみを `<tr><td colSpan>` で作ると、数値列（`white-space: nowrap`）の幅に引きずられて、幅360pxのサイドパネルの外へ内容が押し出される。`tsc`・vitest・`vite build` はどれも検出せず、**実機で見て初めて分かる**。`position: sticky; left: 0` と幅の上限で閉じ込める。
 16. **`mousemove` をレイヤごとに複数登録すると、どちらが最後に状態を書くかがレイヤ登録順に依存する**（M5後半）: 施設ポイントは区域ポリゴンの真上に乗るので同じ座標で両方がヒットし、ツールチップが二重に出うる。**単一の `mousemove` で `queryRenderedFeatures` を優先順に呼び、常にどちらか一方だけを選ぶ**（既存の `click` ハンドラと同じ書き方）。canvas外へ一気に抜けた場合の保険として `mouseout` も要る。
+17. **ダウンロード用CSVと正本CSVは別物にする**（M6）: 正本 `data/processed/*.csv` は BOMなし・LF（バイト一致の再現性テストの前提）。画面から落とすCSVはExcelで開く用途なので BOM付き・CRLF。同じ既定値で両方を作ろうとしないこと。ZIPに入れるのは**正本のバイト列そのまま**（BOM付与も改行変換もしない）で、ZIP内CSVのSHA-256が `data/processed/` と一致することが真正性の担保になる。
+18. **画面表示用のフォーマッタをCSVに流用しない**（M6）: `formatInteger()` は3桁区切りを入れるため、CSVに使うと `1,234` がCSVの区切りと衝突する（クォートされて数値として読めなくなる）。CSVは生値を出し、丸めるのは派生値（比・変化率）だけにする。
+19. **`tsconfig` に `noUncheckedIndexedAccess` が無い**（M6）: `Record<string, number>` への添字アクセスが実行時 `undefined` を返す経路（例: 年度キーの取り違え）が型検査を素通りし、そのままCSVへ文字列 `"undefined"` が静かに混ざる。シリアライザ側（`toCsvText`）で `undefined` を検出して落とすこと。
+20. **公表物が言っていない年を出力に足さない**（M6）: 推計流出/流入患者割合には原典もmeta.jsonも対象年を書いていないので、CSVの `year` 列は空欄にする（基準人口の年の不一致と同じ理由。断定すると公表物にない主張になる）。
+21. **自前のZIPは書きっぱなしにしない**（M6）: 依存を増やさないため `node:zlib` だけでZIPを組み立てているが、書いた直後に読み直して全エントリが元データとバイト一致することを検証する。決定性のためタイムスタンプは固定値にする（生成日時を入れると同じ入力でもバイトが変わる）。
+22. **幅360pxのパネルに4列テーブルを `width: 100%` で押し込むと列が潰れる**（M6）: 「内容」列が1〜3文字ずつ折り返して読めなくなる。`width: max-content; min-width: 100%` にして、はみ出しは `overflow-x: auto` のラッパへ逃がす（罠15と同じく、実機で見るまで分からない）。
 
 ## ドキュメント
 
@@ -233,4 +242,13 @@ npm run typecheck  # tsc --noEmit のみ
 - 地図には**選択中の区域の施設のみ**を点で表示する（全国10,244点の一括表示はしない。要件 §3.2 のドリルダウンに沿い、座標の二重保持と低ズームでの過密表示を避けるため）。円の半径は病床数、病床数が欠測の施設も最小半径で描く（欠測を0床にしない）
 - 実装で判明した罠は「可視化実装で判明した罠」節の12〜16に記録
 
-**未実装**: 流入流出（001723366）のパーサ、M6（CSVダウンロード）。
+**M6「CSVダウンロード + 加工データ一括配布」完了**: 要件 `doc/REQUIREMENTS.md` §3.3 の2方式をどちらも実装した。
+- **①表示条件絞り込みCSV**（`web/src/lib/downloads.ts` の3関数、`web/src/lib/csv.ts` の `toCsvText` でシリアライズ）:
+  - `buildAreaTableCsv` — 地図に表示中の指標（病床機能1つ or 需要区分1つ×年度1つ）を全339区域ぶん（Controls「表示中のデータをCSV」）
+  - `buildAreaDetailCsv` — 選択中の区域1つの基礎情報・病床・医療需要推計をlong形式で（AreaPanel「この区域の指標をCSV」）
+  - `buildFacilityCsv` — 選択中の区域の医療機関一覧×21指標をlong形式で（FacilityList「一覧をCSV」）。座標を持たない施設も行として出す
+  - 3関数とも由来ヘッダー（`#`行、出典・出力条件・注記）をCSV本文の先頭に埋め込む（`buildPreamble`）。ダウンロード実行は `triggerDownload.ts` に分離
+- **②加工済みデータ一括DL**: `web/scripts/sync-data.mjs` が `data/processed/` の加工済みCSV13本＋各`.meta.json`をZIP化し `web/public/downloads/chiiki-iryo-koso_processed-csv_R7.zip`（28エントリ・約2.3MB）として書き出す。ZIP本体の組み立ては依存ゼロの自前実装（`web/scripts/lib/zip.mjs`）、MANIFEST.tsv・README.mdの内容は `web/scripts/lib/bundle.mjs`。`web/public/downloads/area_boundaries_R7.geojson`（正本の単体コピー）も同時に書き出す。画面側は `BulkDownload.tsx` が `download_manifest.json` を表示するだけで、ZIP自体はブラウザの通常のダウンロードに任せる
+- 実装で判明した罠は「可視化実装で判明した罠」節の17〜22に記録
+
+**未実装**: 流入流出（001723366）のパーサ。

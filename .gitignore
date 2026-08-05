@@ -19,6 +19,10 @@ web/src/generated/
 # 生成する。web/src/generated/と同じく生成物なのでコミットしない）
 web/public/facilities/
 
+# 加工済みCSV一括ダウンロードZIP・GeoJSON単体コピー（sync-dataがdata/processed/
+# から生成する。上記facilities/と同じく生成物なのでコミットしない）
+web/public/downloads/
+
 # Claude Code (個人設定はコミットしない)
 .claude/settings.local.json
 

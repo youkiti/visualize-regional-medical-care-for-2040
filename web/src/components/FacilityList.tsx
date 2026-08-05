@@ -13,6 +13,8 @@ interface FacilityListProps {
   onRetry: () => void;
   metrics: FacilityMetric[];
   valueStatusLabels: Record<FacilityValueStatus, string>;
+  /** この区域の医療機関一覧をCSVでダウンロードする（lib/downloads.ts buildFacilityCsv）。 */
+  onDownloadFacilities: () => void;
 }
 
 // 折りたたみ時の一覧に出す5列（施設名以外）。metrics配列の中からkeyで引く
@@ -104,6 +106,7 @@ export default function FacilityList({
   onRetry,
   metrics,
   valueStatusLabels,
+  onDownloadFacilities,
 }: FacilityListProps) {
   // 区域を切り替えるたびにこのコンポーネント自体がAreaPanel側でkey={area_code}
   // で再マウントされるため、展開状態はここでuseStateするだけで区域切替時に
@@ -128,6 +131,16 @@ export default function FacilityList({
     [facilities]
   );
 
+  // 「一覧をCSV」は取得済み(status==='loaded')かつ1件以上のときだけ活性にする
+  // （brief記載どおり）。非活性の理由はtitleで説明する。
+  const facilitiesLoaded = status === 'loaded' && facilities !== null;
+  const hasFacilities = facilitiesLoaded && facilities.length > 0;
+  const downloadDisabledReason = !facilitiesLoaded
+    ? '医療機関一覧の読み込みが完了してから利用できます'
+    : !hasFacilities
+      ? 'この区域には医療機関がありません'
+      : null;
+
   const toggle = (recordId: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -139,7 +152,18 @@ export default function FacilityList({
 
   return (
     <section aria-label="医療機関一覧">
-      <h3 className="area-panel-subheading">医療機関（{facilityCount}件）</h3>
+      <div className="area-panel-subheading-row">
+        <h3 className="area-panel-subheading">医療機関（{facilityCount}件）</h3>
+        <button
+          type="button"
+          className="download-button"
+          onClick={onDownloadFacilities}
+          disabled={downloadDisabledReason !== null}
+          title={downloadDisabledReason ?? 'この区域の医療機関一覧（21指標）をCSVでダウンロードします'}
+        >
+          一覧をCSV
+        </button>
+      </div>
 
       {status === 'loading' && <p className="area-panel-placeholder">医療機関一覧を読み込み中…</p>}
 

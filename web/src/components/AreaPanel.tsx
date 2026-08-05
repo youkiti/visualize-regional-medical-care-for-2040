@@ -44,6 +44,10 @@ interface AreaPanelProps {
   onRetryFacilities: () => void;
   facilityMetrics: FacilityMetric[];
   facilityValueStatusLabels: Record<FacilityValueStatus, string>;
+  /** この区域の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードする（lib/downloads.ts buildAreaDetailCsv）。 */
+  onDownloadAreaDetail: () => void;
+  /** この区域の医療機関一覧をCSVでダウンロードする（lib/downloads.ts buildFacilityCsv）。FacilityListへそのまま渡す。 */
+  onDownloadFacilities: () => void;
 }
 
 export default function AreaPanel({
@@ -64,6 +68,8 @@ export default function AreaPanel({
   onRetryFacilities,
   facilityMetrics,
   facilityValueStatusLabels,
+  onDownloadAreaDetail,
+  onDownloadFacilities,
 }: AreaPanelProps) {
   const isSyntheticBoundary = boundarySource != null && boundarySource.includes('三重県');
 
@@ -72,7 +78,17 @@ export default function AreaPanel({
       <h2>
         {area.pref_name} / {area.area_name}
       </h2>
-      <p className="area-panel-code">構想区域コード: {area.area_code}</p>
+      <p className="area-panel-code">
+        <span>構想区域コード: {area.area_code}</span>
+        <button
+          type="button"
+          className="download-button"
+          onClick={onDownloadAreaDetail}
+          title="この区域の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードします"
+        >
+          この区域の指標をCSV
+        </button>
+      </p>
 
       <table className="bed-table">
         <thead>
@@ -199,6 +215,7 @@ export default function AreaPanel({
         onRetry={onRetryFacilities}
         metrics={facilityMetrics}
         valueStatusLabels={facilityValueStatusLabels}
+        onDownloadFacilities={onDownloadFacilities}
       />
 
       {boundarySource && (

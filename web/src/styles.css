@@ -422,9 +422,39 @@ a {
 }
 
 .area-panel-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
   color: var(--color-text-tertiary);
   font-size: 0.78rem;
   margin: 0 0 10px 0;
+}
+
+/* CSVダウンロードボタン群（Controls「表示中のデータをCSV」以外の3箇所:
+   AreaPanel「この区域の指標をCSV」・FacilityList「一覧をCSV」）に共通の
+   小さいボタン。.controls button とは別の場所（サイドパネル内）に置くため
+   専用のクラスにしている（見た目は.facility-list-error buttonに合わせる）。 */
+.download-button {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.download-button:hover:not(:disabled) {
+  background: #eeeeea;
+}
+
+.download-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .area-panel-placeholder {
@@ -458,6 +488,26 @@ table.bed-table thead th {
 
 .side-panel h3.area-panel-subheading {
   margin-top: 10px;
+}
+
+/* FacilityListの見出し行（「医療機関（n件）」＋「一覧をCSV」ボタン）。
+   見出しの下線(border-bottom)は本来h3側が持つが、ボタンを横に並べるため
+   行のほうへ移し、h3側では打ち消す（罫線が行全体の幅で1本になるように）。 */
+.area-panel-subheading-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 4px;
+}
+
+.area-panel-subheading-row h3.area-panel-subheading {
+  margin: 0;
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 table.demand-table {
@@ -579,6 +629,122 @@ tr.demand-row-baseline {
 .source-notes .known-issues summary {
   cursor: pointer;
   color: var(--color-text-secondary);
+}
+
+/* 加工済みデータの一括ダウンロード（BulkDownload、SourceNotesの直前に置く）。
+   .source-notesと同じ地の色・サイズ感に合わせつつ、独自のリスト/表を持つ。 */
+.bulk-download {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.bulk-download-list {
+  list-style: none;
+  margin: 0 0 8px 0;
+  padding: 0;
+}
+
+.bulk-download-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.bulk-download-list li:last-child {
+  border-bottom: none;
+}
+
+/* 長いファイル名でもサイドパネル幅(360px)からはみ出して横スクロールが
+   出ないよう折り返す(CLAUDE.mdの罠15と同種の失敗を避ける)。 */
+.bulk-download-list a {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.bulk-download-meta,
+.bulk-download-sha {
+  font-size: 0.72rem;
+  color: var(--color-text-tertiary);
+}
+
+.bulk-download-sha .download-sha {
+  background: #f2f1ec;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.bulk-download-members summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.bulk-download-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 6px;
+}
+
+/* width:100% にすると幅360pxのパネルに4列を押し込むことになり、「内容」列が
+   1〜3文字ずつ折り返して読めなくなる。列の内容に合わせて広げ、はみ出しは
+   .bulk-download-table-wrap の横スクロールへ逃がす（既存の施設一覧テーブルと
+   同じ扱い）。 */
+table.bulk-download-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+table.bulk-download-table td:nth-child(2) {
+  min-width: 11rem;
+}
+
+table.bulk-download-table th,
+table.bulk-download-table td {
+  text-align: left;
+  padding: 3px 5px;
+  border-bottom: 1px solid var(--color-rule);
+  overflow-wrap: anywhere;
+}
+
+/* ファイル名は語中で折り返すと area_bed_r / eport_rate. / csv のように読めなく
+   なるため、折り返さずに .bulk-download-table-wrap 側の横スクロールへ逃がす
+   （パネル自体からはみ出させない、という罠15の要件はwrapが満たしている）。 */
+table.bulk-download-table td:nth-child(1) {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+table.bulk-download-table th:nth-child(3),
+table.bulk-download-table td:nth-child(3),
+table.bulk-download-table th:nth-child(4),
+table.bulk-download-table td:nth-child(4) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.bulk-download-table thead th {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.bulk-download-note {
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  background: #f2f1ec;
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.bulk-download-note code {
+  font-size: 0.7rem;
 }
 
 /* 医療機関一覧（区域パネル末尾）。bed-table/demand-tableと同じ表組みの流儀に
