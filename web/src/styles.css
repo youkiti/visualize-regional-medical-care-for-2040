@@ -1050,3 +1050,77 @@ tr.facility-detail-row td {
 .flow-download-button {
   margin-top: 8px;
 }
+
+/* 表示単位トグル（都道府県／構想区域）。.controls-group の中に入るので、
+   フォントサイズ等は既存の .controls button を引き継ぐ。選択中は塗り分けの
+   青系ではなく中立の濃色にして、地図の配色（発散7色）と混同させない。 */
+.controls-legend {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.level-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.controls .level-toggle-button {
+  border: none;
+  border-radius: 0;
+  padding: 4px 10px;
+  background: white;
+  cursor: pointer;
+}
+
+.controls .level-toggle-button + .level-toggle-button {
+  border-left: 1px solid var(--color-rule);
+}
+
+.controls .level-toggle-button.is-active {
+  background: #3c4650;
+  color: white;
+  font-weight: 600;
+}
+
+/* 全国（参考）の折りたたみ。都道府県パネルの中で、県の数字より一段弱く見せる。 */
+.national-reference {
+  margin: 0 0 12px 0;
+  font-size: 0.82rem;
+}
+
+.national-reference summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+
+/* 「この値は本サイトが合計した派生値」の注記。原典どおりの値と取り違えられると
+   まずいので、.boundary-note と同じ中立の注記色で値のすぐ下に置く。 */
+.derived-note {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  background: #f2f1ec;
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
+.drilldown-button {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px 0;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: white;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.drilldown-button:hover {
+  background: #f2f1ec;
+}

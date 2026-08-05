@@ -1,8 +1,18 @@
 import AreaSearch from './AreaSearch';
 import { isDemandMetric } from '../lib/metrics';
-import type { AreaIndicator, BedFunctionKey, BedMetricKind, DemandMetricKind, MetricKind } from '../types';
+import type {
+  AreaIndicator,
+  BedFunctionKey,
+  BedMetricKind,
+  DemandMetricKind,
+  MapLevel,
+  MetricKind,
+} from '../types';
 
 interface ControlsProps {
+  /** 地図の表示単位（'pref'=47都道府県の概観、'area'=339構想区域）。 */
+  level: MapLevel;
+  onLevelChange: (level: MapLevel) => void;
   bedFunction: BedFunctionKey;
   onBedFunctionChange: (fn: BedFunctionKey) => void;
   functions: BedFunctionKey[];
@@ -33,7 +43,18 @@ const DEMAND_METRIC_OPTIONS: Array<{ value: DemandMetricKind; label: string }> =
   { value: 'demand_outpatient', label: '外来' },
 ];
 
+const LEVEL_OPTIONS: Array<{ value: MapLevel; label: string; title: string }> = [
+  {
+    value: 'pref',
+    label: '都道府県',
+    title: '47都道府県で概観する（病床は厚生労働省の都道府県別公表値、医療需要は構想区域からの集計）',
+  },
+  { value: 'area', label: '構想区域', title: '339構想区域で見る（医療機関のドリルダウンはこちら）' },
+];
+
 export default function Controls({
+  level,
+  onLevelChange,
   bedFunction,
   onBedFunctionChange,
   functions,
@@ -55,6 +76,25 @@ export default function Controls({
 
   return (
     <div className="controls">
+      <div className="controls-group">
+        <span className="controls-legend" id="level-toggle-label">
+          表示単位
+        </span>
+        <div className="level-toggle" role="group" aria-labelledby="level-toggle-label">
+          {LEVEL_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              className={level === opt.value ? 'level-toggle-button is-active' : 'level-toggle-button'}
+              aria-pressed={level === opt.value}
+              title={opt.title}
+              onClick={() => onLevelChange(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="controls-group">
         <label htmlFor="bed-function-select">病床機能</label>
         <select
@@ -121,12 +161,18 @@ export default function Controls({
         <button type="button" onClick={onResetView}>
           全国表示に戻す
         </button>
+        {/* CSVは常に339構想区域ぶんを出す（都道府県ぶんのCSVはまだ無い）。
+            表示単位が都道府県のときにラベルを変えないと、出てくる中身と食い違う。 */}
         <button
           type="button"
           onClick={onDownloadAreaTable}
-          title="地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします"
+          title={
+            level === 'pref'
+              ? '現在の病床機能・指標・年度のまま、全339構想区域ぶんをCSVでダウンロードします（都道府県ぶんの集計CSVは未対応）'
+              : '地図に表示中の指標（現在の病床機能・指標・年度）を、全339構想区域ぶんCSVでダウンロードします'
+          }
         >
-          表示中のデータをCSV
+          {level === 'pref' ? '構想区域のデータをCSV' : '表示中のデータをCSV'}
         </button>
       </div>
     </div>

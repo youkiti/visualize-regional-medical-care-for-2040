@@ -4,6 +4,7 @@ import MapView, { type MapViewHandle } from './components/MapView';
 import Legend from './components/Legend';
 import Controls from './components/Controls';
 import AreaPanel from './components/AreaPanel';
+import PrefecturePanel from './components/PrefecturePanel';
 import BulkDownload from './components/BulkDownload';
 import SourceNotes from './components/SourceNotes';
 import { computeQuantileEdges, isDemandMetric } from './lib/metrics';
@@ -14,9 +15,11 @@ import { buildFacilityPoints } from './lib/facilityPoints';
 import { buildAreaDetailCsv, buildAreaFlowCsv, buildAreaTableCsv, buildFacilityCsv } from './lib/downloads';
 import { triggerDownload } from './lib/triggerDownload';
 import mapDataUrl from './generated/area_map.json?url';
+import prefMapDataUrl from './generated/pref_map.json?url';
 import indicatorsJson from './generated/area_indicators.json';
 import demandJson from './generated/area_demand.json';
 import areaIndexJson from './generated/area_index.json';
+import prefectureIndicatorsJson from './generated/prefecture_indicators.json';
 import facilitySummaryJson from './generated/facility_summary.json';
 import downloadManifestJson from './generated/download_manifest.json';
 import type {
@@ -28,7 +31,9 @@ import type {
   FacilitySummaryData,
   FlowDirectionKey,
   FlowPhaseKey,
+  MapLevel,
   MetricKind,
+  PrefectureIndicatorsData,
 } from './types';
 
 // generated/area_indicators.json is a verbatim copy of
@@ -48,6 +53,32 @@ const demand = demandJson as unknown as AreaDemandData;
 // query, so it works regardless of the map's current load/viewport state.
 const areaIndex = areaIndexJson as unknown as AreaIndexEntry[];
 const areaIndexByCode = new Map(areaIndex.map((entry) => [entry.area_code, entry]));
+
+// generated/prefecture_indicators.json is a verbatim copy of
+// data/processed/prefecture_indicators_R7.json — the overview (都道府県) layer's
+// beds + demand, plus the 全国 row that has no boundary of its own. Its shape
+// is documented by PrefectureIndicatorsData in types.ts (it deliberately does
+// NOT reuse the AreaIndicators*/AreaDemand* types — see the comment there).
+const prefectureIndicators = prefectureIndicatorsJson as unknown as PrefectureIndicatorsData;
+const prefectureByCode = new Map(prefectureIndicators.prefectures.map((p) => [p.pref_code, p]));
+
+// 都道府県のbboxは pref_map.json 側にあるが、地図の読み込み状態に依存せず
+// 「県を選んで区域表示へ降りる」を成立させるため、区域と同じくバンドル済み
+// データ(area_index.json)から算出する。区域のbboxの和集合＝県のbboxになる
+// (県境は区域境界のディゾルブなので、両者の外周は一致する)。
+const prefBBoxByCode = new Map<string, [number, number, number, number]>();
+for (const entry of areaIndex) {
+  const prefCode = entry.area_code.slice(0, 2);
+  const current = prefBBoxByCode.get(prefCode);
+  if (!current) {
+    prefBBoxByCode.set(prefCode, [entry.bb_w, entry.bb_s, entry.bb_e, entry.bb_n]);
+    continue;
+  }
+  current[0] = Math.min(current[0], entry.bb_w);
+  current[1] = Math.min(current[1], entry.bb_s);
+  current[2] = Math.max(current[2], entry.bb_e);
+  current[3] = Math.max(current[3], entry.bb_n);
+}
 
 // generated/facility_summary.json is the bundled, lightweight (no facilities[])
 // summary of data/processed/area_facilities_R7.json — see types.ts
@@ -89,6 +120,9 @@ const FLOW_PHASE_LABELS_FALLBACK: Record<FlowPhaseKey, string> = {
 const FLOW_ROLE_LABELS: Record<FlowDirectionKey, string> = { inflow: '流入元', outflow: '流出先' };
 
 export default function App() {
+  // 既定は構想区域(要件 §3.1 で「主役の表示単位」とされている方)。都道府県は
+  // 概観用のレイヤとしてトグルで切り替える。
+  const [level, setLevel] = useState<MapLevel>('area');
   const [bedFunction, setBedFunction] = useState<BedFunctionKey>('total');
   const [metric, setMetric] = useState<MetricKind>('ratio');
   const [yearIndex, setYearIndex] = useState<number>(DEFAULT_YEAR_INDEX);
@@ -104,6 +138,7 @@ export default function App() {
   // しない切替)は維持し、オーバーレイが新しい区域に追随するようにする
   // (下のuseEffect、brief記載どおり)。
   const [flowMapEnabled, setFlowMapEnabled] = useState(false);
+  const [selectedPrefCode, setSelectedPrefCode] = useState<string | null>(null);
   const mapRef = useRef<MapViewHandle>(null);
 
   const functionLabel = indicators.function_labels[bedFunction];
@@ -115,12 +150,18 @@ export default function App() {
   // runtime) — the a_*/n_* values in area_map.json are the same numbers.
   // Demand metrics use their own fixed (non-quantile) bins (see
   // DEMAND_RATIO_BIN_EDGES in lib/metrics.ts), so they don't need this at all.
+  // 分位は表示単位ごとに別物にする（47都道府県の分位を339区域へ、あるいはその逆を
+  // 当てると、凡例の区分と地図の色が実データの分布から外れる）。固定境界の
+  // 'ratio'・需要指標には影響しない。
   const quantileEdges = useMemo(() => {
     if (metric === 'ratio' || isDemandMetric(metric)) return [];
     const key = metric === 'actual' ? 'actual_2025' : 'need_2025';
-    const values = indicators.areas.map((area) => area.beds[bedFunction][key]);
+    const values =
+      level === 'pref'
+        ? prefectureIndicators.prefectures.map((pref) => pref.beds[bedFunction][key])
+        : indicators.areas.map((area) => area.beds[bedFunction][key]);
     return computeQuantileEdges(values);
-  }, [bedFunction, metric]);
+  }, [bedFunction, metric, level]);
 
   const selectedArea = useMemo(() => {
     if (!selectedAreaCode) return null;
@@ -136,6 +177,11 @@ export default function App() {
     if (!selectedAreaCode) return null;
     return areaIndexByCode.get(selectedAreaCode) ?? null;
   }, [selectedAreaCode]);
+
+  const selectedPrefecture = useMemo(() => {
+    if (!selectedPrefCode) return null;
+    return prefectureByCode.get(selectedPrefCode) ?? null;
+  }, [selectedPrefCode]);
 
   // 医療機関shardは選択中の区域1本だけを取得する(339区域ぶんをバンドルしない)。
   // 競合状態対策・メモリキャッシュはuseFacilityShard内部で完結している
@@ -165,6 +211,12 @@ export default function App() {
   // 地図に渡す患者の流入・流出オーバーレイ。オーバーレイON・区域選択あり・
   // 流入出データ取得済みの3条件が揃ったときだけ組み立てる。
   const flowOverlay: FlowOverlay | null = useMemo(() => {
+    // 流入出は構想区域単位のデータなので、都道府県表示中(level==='pref')は
+    // オーバーレイ自体を無効にする。ここでnullにしないと、地図の塗りは
+    // 都道府県の指標のまま凡例だけ流入出の説明が残り、両者が食い違う
+    // （M8の階層トグルとの統合時に実機で見つけた）。構想区域表示へ戻せば
+    // flowMapEnabled は維持されているのでオーバーレイも復帰する。
+    if (level !== 'area') return null;
     if (!flowMapEnabled || !selectedAreaCode || !selectedArea || !selectedFlowEntry) return null;
     const group = selectedFlowEntry.flows[flowDirection].phases[flowPhase];
     return {
@@ -177,20 +229,27 @@ export default function App() {
       directionLabel: FLOW_ROLE_LABELS[flowDirection],
       phaseLabel: (flowData?.phase_labels ?? FLOW_PHASE_LABELS_FALLBACK)[flowPhase],
     };
-  }, [flowMapEnabled, selectedAreaCode, selectedArea, selectedFlowEntry, flowDirection, flowPhase, flowData]);
+  }, [level, flowMapEnabled, selectedAreaCode, selectedArea, selectedFlowEntry, flowDirection, flowPhase, flowData]);
 
   // 地図に出す医療機関ポイント。選択区域のshardが変わったときだけ組み立て
   // 直す(facilitySummary.metricsはモジュールスコープの定数で参照が変わらない)。
   // shard===null(未選択/未取得)のときは buildFacilityPoints 側が空の
   // FeatureCollectionを返すので、区域選択を解除すると地図の点も消える。
+  // 都道府県表示中は医療機関の点を出さない（区域を選んだまま概観へ切り替えても、
+  // 前の区域の点が県の塗りの上に残らないようにする）。区域へ戻せば
+  // useFacilityShard のキャッシュから再取得なしで復帰する。
   const facilityPoints = useMemo(
-    () => buildFacilityPoints(facilityShard?.facilities ?? null, facilitySummary.metrics),
-    [facilityShard]
+    () =>
+      level === 'area'
+        ? buildFacilityPoints(facilityShard?.facilities ?? null, facilitySummary.metrics)
+        : buildFacilityPoints(null, facilitySummary.metrics),
+    [facilityShard, level]
   );
 
   const handleResetView = () => {
     mapRef.current?.resetView();
     setSelectedAreaCode(null);
+    setSelectedPrefCode(null);
   };
 
   // 指標セレクタ・病床機能・年度スライダーは地図の塗りの意味そのものを
@@ -224,14 +283,34 @@ export default function App() {
     setSelectedAreaCode(areaCode);
   };
 
+  // 地図クリック（都道府県表示中）。区域と同じく選択を記録するだけで視点は動かさない。
+  const handleMapSelectPrefecture = (prefCode: string | null) => {
+    setSelectedPrefCode(prefCode);
+  };
+
   // 区域検索: selection no longer depends on the map's load/viewport state
   // (see MapView.selectArea) — App resolves the bbox itself from
   // area_index.json and only asks the map to fitBounds.
+  // 検索の対象は構想区域なので、都道府県表示中に選ばれたら表示単位も区域へ切り替える
+  // （切り替えないと、選んだ区域が塗られていない地図の上で選択だけが起きる）。
   const handleSearchSelect = (areaCode: string) => {
+    setLevel('area');
     setSelectedAreaCode(areaCode);
     const entry = areaIndexByCode.get(areaCode);
     if (entry) {
       mapRef.current?.selectArea([entry.bb_w, entry.bb_s, entry.bb_e, entry.bb_n]);
+    }
+  };
+
+  // 都道府県パネルの「この県の構想区域を見る」。表示単位を区域へ落として当該県へ
+  // ズームし、区域の選択は空にする（どの区域かはまだ選ばれていないため）。
+  const handleDrillDownToAreas = () => {
+    if (!selectedPrefCode) return;
+    setLevel('area');
+    setSelectedAreaCode(null);
+    const bbox = prefBBoxByCode.get(selectedPrefCode);
+    if (bbox) {
+      mapRef.current?.selectArea(bbox);
     }
   };
 
@@ -298,8 +377,8 @@ export default function App() {
       <header className="app-header">
         <h1>地域医療構想 可視化（2040年に向けて）</h1>
         <p>
-          339構想区域ごとに、2025年病床数（実績・必要数）と、在宅（訪問診療）・外来の医療需要推計
-          （2024〜2050年度、2024年度比）を比較します。
+          47都道府県／339構想区域ごとに、2025年病床数（実績・必要数）と、在宅（訪問診療）・外来の医療需要推計
+          （2024〜2050年度、2024年度比）を比較します。構想区域を選ぶと個別の医療機関まで辿れます。
         </p>
       </header>
       <div className="app-body">
@@ -307,12 +386,16 @@ export default function App() {
           <MapView
             ref={mapRef}
             mapDataUrl={mapDataUrl}
+            prefMapDataUrl={prefMapDataUrl}
+            level={level}
             bedFunction={bedFunction}
             metric={metric}
             functionLabel={functionLabel}
             quantileEdges={quantileEdges}
             selectedAreaCode={selectedAreaCode}
             onSelectArea={handleMapSelectArea}
+            selectedPrefCode={selectedPrefCode}
+            onSelectPrefecture={handleMapSelectPrefecture}
             demandYear={selectedYear}
             demandYearLabel={selectedYearLabel}
             demandCategoryLabels={demand.category_labels}
@@ -320,6 +403,8 @@ export default function App() {
             flowOverlay={flowOverlay}
           />
           <Controls
+            level={level}
+            onLevelChange={setLevel}
             bedFunction={bedFunction}
             onBedFunctionChange={handleBedFunctionChange}
             functions={indicators.functions}
@@ -336,16 +421,37 @@ export default function App() {
             onYearIndexChange={handleYearIndexChange}
           />
           <Legend
+            level={level}
             metric={metric}
             functionLabel={functionLabel}
             quantileEdges={quantileEdges}
             demandYearLabel={selectedYearLabel}
-            showFacilityNote={selectedAreaCode !== null}
+            showFacilityNote={level === 'area' && selectedAreaCode !== null}
             flowOverlay={flowOverlay}
           />
         </div>
         <aside className="side-panel">
-          {selectedArea ? (
+          {level === 'pref' ? (
+            selectedPrefecture ? (
+              <PrefecturePanel
+                prefecture={selectedPrefecture}
+                national={prefectureIndicators.national}
+                functions={prefectureIndicators.functions}
+                functionLabels={prefectureIndicators.function_labels}
+                demandCategories={prefectureIndicators.categories}
+                demandCategoryLabels={prefectureIndicators.category_labels}
+                demandYears={prefectureIndicators.years}
+                demandYearLabels={prefectureIndicators.year_labels}
+                demandBaselineYear={prefectureIndicators.baseline_year}
+                onDrillDown={handleDrillDownToAreas}
+              />
+            ) : (
+              <p className="area-panel-placeholder">
+                地図上の都道府県をクリックすると詳細が表示されます。個別の医療機関まで見るには
+                「表示単位」を構想区域に切り替えてください。
+              </p>
+            )
+          ) : selectedArea ? (
             <AreaPanel
               area={selectedArea}
               boundarySource={selectedIndexEntry?.boundary_source ?? null}
@@ -392,6 +498,7 @@ export default function App() {
             demandMetadata={demand.metadata}
             facilityMetadata={facilitySummary.metadata}
             flowMetadata={flowData?.metadata ?? null}
+            prefectureMetadata={prefectureIndicators.metadata}
           />
         </aside>
       </div>
