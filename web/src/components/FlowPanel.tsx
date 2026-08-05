@@ -204,11 +204,17 @@ export default function FlowPanel({
   const loaded = status === 'loaded' && entry !== null;
   const downloadDisabledReason = !loaded ? 'この内訳の読み込みが完了してから利用できます' : null;
 
+  // M14: 外側の<section aria-label="患者の流入・流出">とh3見出しはAreaPanel側の
+  // PanelSection（<section aria-label>とアコーディオンのh3見出しを持つ）へ移した。
+  // ここでは中身だけを返す（PanelSectionはFlowPanelの外側に置くこと — 内側に
+  // 置くと将来key指定でFlowPanelを作り直したときに開閉状態まで飛ぶため）。
   return (
-    <section aria-label="患者の流入・流出">
-      <h3 className="area-panel-subheading">患者の流入・流出（NDB 2024年度）</h3>
+    <>
+      {/* M14: 「基礎情報」章はアコーディオンで開閉・折りたたみできるため、この章との
+          位置関係が画面上で一定しない。「上の」のような位置語は参照先を指せなく
+          なるので、章名を名指しする。 */}
       <p className="flow-subnote">
-        ※ 上の「推計流出患者割合」「推計流入患者割合」（患者調査2023年）とは出典・対象年が異なる別の統計です。
+        ※ 「基礎情報」の「推計流出患者割合」「推計流入患者割合」（患者調査2023年）とは出典・対象年が異なる別の統計です。
       </p>
 
       <div className="flow-toggle-group" role="group" aria-label="方向">
@@ -230,8 +236,12 @@ export default function FlowPanel({
           <p className="flow-overall">
             原典の「全体の{directionLabels[direction]}」: {formatPercent(entry.flows[direction].overall_rate, 1)}
           </p>
+          {/* M14: 「データの既知の問題」は「出典・注記」内の「患者の流入・流出」
+              ブロックの、さらに折りたたみの中にある。アコーディオンで開閉・並び順が
+              変わりうるため「下の」のような位置語では参照先を指せない。たどり着ける
+              よう経路をそのまま書く。 */}
           <p className="flow-note">
-            ※ 3区分の合計ではなく、「高度急性期+急性期」の自区域シェアの余事象です（下の「データの既知の問題」参照）。
+            ※ 3区分の合計ではなく、「高度急性期+急性期」の自区域シェアの余事象です（「出典・注記」の「患者の流入・流出」→「データの既知の問題」参照）。
           </p>
         </>
       )}
@@ -288,6 +298,6 @@ export default function FlowPanel({
       >
         この内訳をCSV
       </button>
-    </section>
+    </>
   );
 }

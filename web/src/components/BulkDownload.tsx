@@ -1,3 +1,4 @@
+import PanelSection from './PanelSection';
 import { bulkDownloadUrl, formatBytes } from '../lib/downloadAssets';
 import { formatInteger } from '../lib/metrics';
 import type { DownloadManifest } from '../types';
@@ -28,64 +29,67 @@ function ShaCode({ sha256 }: { sha256: string }) {
 export default function BulkDownload({ manifest }: BulkDownloadProps) {
   const { bundle, boundaries, members } = manifest;
 
+  // M14: 外側の<section aria-label>とh3見出しをPanelSectionへ置き換え、
+  // 章として折りたためるようにした（既定は閉じる）。中身は従来どおり
+  // <div className="bulk-download">で包み、既存のスタイルをそのまま維持する。
   return (
-    <section className="bulk-download" aria-label="加工済みデータの一括ダウンロード">
-      <h3>加工済みデータの一括ダウンロード</h3>
+    <PanelSection title="加工済みデータの一括ダウンロード" defaultOpen={false}>
+      <div className="bulk-download">
+        <ul className="bulk-download-list">
+          <li>
+            <a href={bulkDownloadUrl(bundle.file)} download>
+              {bundle.file}
+            </a>
+            <span className="bulk-download-meta">
+              {formatBytes(bundle.bytes)}／CSV {bundle.csv_count}本＋各.meta.json＋README.md＋MANIFEST.tsv（計
+              {bundle.entry_count}件）
+            </span>
+            <span className="bulk-download-sha">
+              SHA-256: <ShaCode sha256={bundle.sha256} />
+            </span>
+          </li>
+          <li>
+            <a href={bulkDownloadUrl(boundaries.file)} download>
+              {boundaries.file}
+            </a>
+            <span className="bulk-download-meta">{formatBytes(boundaries.bytes)}／構想区域境界GeoJSON（339区域）</span>
+            <span className="bulk-download-sha">
+              SHA-256: <ShaCode sha256={boundaries.sha256} />
+            </span>
+          </li>
+        </ul>
 
-      <ul className="bulk-download-list">
-        <li>
-          <a href={bulkDownloadUrl(bundle.file)} download>
-            {bundle.file}
-          </a>
-          <span className="bulk-download-meta">
-            {formatBytes(bundle.bytes)}／CSV {bundle.csv_count}本＋各.meta.json＋README.md＋MANIFEST.tsv（計
-            {bundle.entry_count}件）
-          </span>
-          <span className="bulk-download-sha">
-            SHA-256: <ShaCode sha256={bundle.sha256} />
-          </span>
-        </li>
-        <li>
-          <a href={bulkDownloadUrl(boundaries.file)} download>
-            {boundaries.file}
-          </a>
-          <span className="bulk-download-meta">{formatBytes(boundaries.bytes)}／構想区域境界GeoJSON（339区域）</span>
-          <span className="bulk-download-sha">
-            SHA-256: <ShaCode sha256={boundaries.sha256} />
-          </span>
-        </li>
-      </ul>
-
-      <details className="bulk-download-members">
-        <summary>収録CSV一覧（{members.length}本）</summary>
-        <div className="bulk-download-table-wrap">
-          <table className="bulk-download-table">
-            <thead>
-              <tr>
-                <th>ファイル</th>
-                <th>内容</th>
-                <th>行数</th>
-                <th>バイト数</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((member) => (
-                <tr key={member.name}>
-                  <td>{member.name}</td>
-                  <td>{member.title}</td>
-                  <td>{formatInteger(member.rows)}</td>
-                  <td>{formatInteger(member.bytes)}</td>
+        <details className="bulk-download-members">
+          <summary>収録CSV一覧（{members.length}本）</summary>
+          <div className="bulk-download-table-wrap">
+            <table className="bulk-download-table">
+              <thead>
+                <tr>
+                  <th>ファイル</th>
+                  <th>内容</th>
+                  <th>行数</th>
+                  <th>バイト数</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
+              </thead>
+              <tbody>
+                {members.map((member) => (
+                  <tr key={member.name}>
+                    <td>{member.name}</td>
+                    <td>{member.title}</td>
+                    <td>{formatInteger(member.rows)}</td>
+                    <td>{formatInteger(member.bytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
 
-      <p className="bulk-download-note">
-        注記: ZIP内のCSVは <code>data/processed/</code> の正本そのまま（UTF-8 BOMなし・改行LF）です。画面のボタンから出るCSV（表示中のデータ／区域の指標／医療機関一覧）はExcelで開く用途のため
-        BOM付き・CRLF で別物です。
-      </p>
-    </section>
+        <p className="bulk-download-note">
+          注記: ZIP内のCSVは <code>data/processed/</code> の正本そのまま（UTF-8 BOMなし・改行LF）です。画面のボタンから出るCSV（表示中のデータ／区域の指標／医療機関一覧）はExcelで開く用途のため
+          BOM付き・CRLF で別物です。
+        </p>
+      </div>
+    </PanelSection>
   );
 }

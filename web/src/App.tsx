@@ -512,6 +512,7 @@ export default function App() {
                 demandYears={prefectureIndicators.years}
                 demandYearLabels={prefectureIndicators.year_labels}
                 demandBaselineYear={prefectureIndicators.baseline_year}
+                bedsCaveat={prefectureIndicators.metadata.processing.caveat.beds}
                 yoyEntry={selectedPrefectureYoy}
                 onDrillDown={handleDrillDownToAreas}
                 onDownloadDetail={handleDownloadPrefectureDetail}
@@ -535,6 +536,7 @@ export default function App() {
               demandYears={demand.years}
               demandYearLabels={demand.year_labels}
               demandBaselineYear={demand.baseline_year}
+              bedsCaveat={indicators.metadata.processing.caveat}
               facilityCount={selectedFacilitySummary?.facility_count ?? 0}
               facilityStatus={facilityStatus}
               facilities={facilityShard?.facilities ?? null}
@@ -574,6 +576,8 @@ export default function App() {
             flowMetadata={flowData?.metadata ?? null}
             prefectureMetadata={prefectureIndicators.metadata}
             prefectureYoyMetadata={prefectureYoy.metadata}
+            level={level}
+            showFacilitySources={level === 'area' && selectedAreaCode !== null}
           />
         </aside>
       </div>

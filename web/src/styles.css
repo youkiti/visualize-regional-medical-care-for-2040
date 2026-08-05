@@ -412,6 +412,63 @@ a {
   margin-bottom: 18px;
 }
 
+/* サイドパネルの章立てアコーディオン（PanelSection、M14）。外側の<section>は
+   既存の.side-panel section { margin-bottom:18px }の余白規則をそのまま活かす
+   ため必ず残す（PanelSection.tsx参照）。 */
+.panel-section > details > summary {
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  list-style-position: outside;
+}
+
+/* <summary>自体ではなく内側のspanをflexコンテナにする。<summary>に
+   display:flexを直接当てると環境によって既定の開閉三角(マーカー)が消える
+   ことがあるため（CLAUDE.md「可視化実装で判明した罠」15・22と同種の実機依存の
+   崩れを避ける）。幅360pxのパネルで見出しが長い場合は折り返す(nowrapにしない)
+   ことで横スクロールを避ける（受け入れ基準11）。 */
+.panel-section-summary-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+/* 罫線はsummary行(上記)が持つため、既存の.side-panel h3側の下線・下余白は
+   ここで打ち消す。見出しレベル(h3)自体はスクリーンリーダーの見出し一覧を
+   壊さないよう維持する。
+   セレクタに .side-panel を含めているのは詳細度のため: `.panel-section-summary-inner h3`
+   だけだと .side-panel h3 と同一詳細度(0,1,1)になり、後に書かれている
+   .side-panel h3 が勝って打ち消しが効かない。実機で「見出しの文字幅ぶんの下線」と
+   「summary行の全幅の罫線」が二重に出て発覚した(tsc・vitest・vite buildは検出しない)。 */
+.side-panel .panel-section-summary-inner h3 {
+  margin: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.panel-section-note {
+  color: var(--color-text-tertiary);
+  font-size: 0.72rem;
+  min-width: 0;
+}
+
+.panel-section-body {
+  padding-top: 6px;
+}
+
+/* CSVボタン等、以前は見出し行に横並びだった操作要素の置き場所。<summary>の
+   中に置けない（クリックが開閉と二重発火する）ため、本文（children）の先頭で
+   右寄せする（PanelSection.tsxのコメント参照）。 */
+.panel-section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .side-panel h2 {
   font-size: 1rem;
   margin: 0 0 2px 0;
@@ -490,30 +547,6 @@ table.bed-table thead th {
   font-weight: 600;
 }
 
-.side-panel h3.area-panel-subheading {
-  margin-top: 10px;
-}
-
-/* FacilityListの見出し行（「医療機関（n件）」＋「一覧をCSV」ボタン）。
-   見出しの下線(border-bottom)は本来h3側が持つが、ボタンを横に並べるため
-   行のほうへ移し、h3側では打ち消す（罫線が行全体の幅で1本になるように）。 */
-.area-panel-subheading-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 10px;
-  margin-bottom: 6px;
-  border-bottom: 1px solid var(--color-rule);
-  padding-bottom: 4px;
-}
-
-.area-panel-subheading-row h3.area-panel-subheading {
-  margin: 0;
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
 table.demand-table {
   width: 100%;
   border-collapse: collapse;
@@ -567,14 +600,53 @@ tr.demand-row-baseline {
   color: var(--color-text-secondary);
 }
 
-/* 基準人口の年が原典間で食い違っている旨の注記。値そのものは正しいので警告色
-   (#fdf0d5/#e3b341)ではなく、.boundary-note と同じ中立の注記色にする。 */
-.population-basis-note {
+/* ティア2（判断を要する注記）の「1行サマリ＋折りたたみ」（M14）。長い注記
+   （基準人口の年の不一致・見込量比と前年比の別・医療機関の「地図に表示なし」
+   バッジの意味）を常時表示から外し、要約だけ常に見える形にする。見た目は
+   グレーボックス（ティア2）に揃える。警告色(#fdf0d5/#e3b341・ティア1)ではなく
+   中立色にしているのは、ここに載る値そのものは正しく、警告ではなく判断の
+   説明だから（例: 基準人口の年の不一致は原典側の表記の食い違いであって、
+   値の誤りではない）。旧.population-basis-note（このクラスに置き換わる前の
+   同じ役割のクラス）が記録していた判断をここに引き継いでいる。 */
+.note-caution-details {
   font-size: 0.72rem;
   color: var(--color-text-secondary);
   background: #f2f1ec;
   border-radius: 4px;
   padding: 6px 8px;
+  margin: 0 0 10px 0;
+  line-height: 1.5;
+}
+
+.note-caution-details summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.note-caution-details[open] summary {
+  margin-bottom: 4px;
+}
+
+.note-caution-details p {
+  margin: 0 0 6px 0;
+}
+
+.note-caution-details p:last-child {
+  margin-bottom: 0;
+}
+
+/* ティア1（琥珀）＝原典側の欠陥・派生物である警告・要件§6必須注記のみ
+   （M14でティア分けを整理。「可視化実装で判明した罠」節参照）。見た目は
+   従来の.source-notes .caveat（琥珀＋太字）を踏襲する。用途は病床の
+   §6注記（AreaPanel/PrefecturePanelの病床表の直下）。 */
+.note-alert {
+  background: #fdf0d5;
+  border: 1px solid #e3b341;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 8px 10px;
+  border-radius: 4px;
   margin: 0 0 10px 0;
   line-height: 1.5;
 }
@@ -601,13 +673,17 @@ tr.demand-row-baseline {
   line-height: 1.6;
 }
 
+/* ティア2（判断を要する注記）。以前は琥珀(#fdf0d5/#e3b341・太字)だったが、
+   M14で警告色(ティア1)は「原典側の欠陥・派生物である警告・§6必須注記」だけに
+   絞った（styles.cssの「可視化実装で判明した罠」節相当のコメント群、上記
+   .note-alert参照）。ここは畳まれた出典ブロック(.source-block)の中の前置きに
+   すぎず、警告色である必要がないため.note-caution-detailsと同じグレーボックス
+   にする。 */
 .source-notes .caveat {
-  background: #fdf0d5;
-  border: 1px solid #e3b341;
-  color: var(--color-text-primary);
+  background: #f2f1ec;
+  color: var(--color-text-secondary);
   padding: 8px 10px;
   border-radius: 4px;
-  font-weight: 600;
   margin-bottom: 10px;
 }
 
@@ -633,6 +709,64 @@ tr.demand-row-baseline {
 .source-notes .known-issues summary {
   cursor: pointer;
   color: var(--color-text-secondary);
+}
+
+/* データセットごとの出典ブロック（病床／医療需要推計／医療機関／患者の流入・
+   流出／公表年度間の比較／都道府県／都道府県の年度間比較、M14）。既定で
+   すべて閉じており、summary行だけで「どの出典があるか」が分かるようにする。
+   .panel-sectionと同じ理由でsummary自体ではなく内側のspanをflexコンテナに
+   する（開閉三角が環境によって消えるのを避ける）。 */
+.source-block {
+  margin-bottom: 12px;
+}
+
+.source-block > summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--color-rule);
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+  /* summary の list-style-position は HTML 標準の推奨レンダリングが `inside` を
+     指定しているため、既定のままだとマーカー(開閉三角)が行内ボックスとして先頭に
+     入る。その直後がブロックレベルの flex コンテナ(.source-block-summary-inner)
+     なので、マーカーだけが1行を占め、ラベルが次の行へ落ちる。.panel-section 側と
+     同じく `outside` にしてマーカーを行の左へ逃がす（実機で発覚。summaryの高さが
+     47px対36pxになっていた）。 */
+  list-style-position: outside;
+}
+
+.source-block-summary-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+/* ラベルを<span>から<h4>に戻した(M14 fix)ため、ブラウザ既定のh4スタイル
+   (太字・独自マージン)を打ち消し、旧<span>のときの見た目を保つ。 */
+.source-block-summary-inner h4 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* 既知の問題の件数バッジ。畳んでいても「ここに注意事項がある」ことが分かる
+   ようにする（brief 1-2）。ティア1（琥珀）— .facility-badge-unmapped と同系の
+   小さいインラインバッジ。0件のときは描画しない（呼び出し側で分岐）。 */
+.source-block-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  background: #fdf0d5;
+  border: 1px solid #e3b341;
+  color: var(--color-text-primary);
 }
 
 /* 加工済みデータの一括ダウンロード（BulkDownload、SourceNotesの直前に置く）。
