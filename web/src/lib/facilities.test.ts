@@ -20,6 +20,7 @@ function makeFacility(overrides: Partial<Record<string, unknown>> = {}) {
     functions: ['地域支援', '三次救急', '二次救急'],
     match_status: 'matched',
     coordinates: [140.7301711, 41.80541985],
+    coordinate_source: 'ksj_p04',
     ...overrides,
   };
 }
@@ -32,6 +33,7 @@ function makeArea(area_code: string, overrides: Partial<Record<string, unknown>>
     pref_name: 'Pref',
     facility_count: 1,
     geocoded_count: 1,
+    reference_geocoded_count: 0,
     coordinate_withdrawn_count: 0,
     facilities: [makeFacility()],
     ...overrides,
@@ -59,6 +61,7 @@ describe('buildAreaShard', () => {
       pref_name: 'Pref',
       facility_count: 1,
       geocoded_count: 1,
+      reference_geocoded_count: 0,
       coordinate_withdrawn_count: 0,
       facilities: area.facilities,
     });
@@ -84,14 +87,14 @@ describe('buildFacilitySummary', () => {
     }
   });
 
-  it('keeps only area_code/facility_count/geocoded_count/coordinate_withdrawn_count per area', () => {
+  it('keeps only area_code/facility_count/geocoded_count/reference_geocoded_count/coordinate_withdrawn_count per area', () => {
     const data = makeFacilitiesData([
-      makeArea('0101', { facility_count: 5, geocoded_count: 3, coordinate_withdrawn_count: 1 }),
+      makeArea('0101', { facility_count: 5, geocoded_count: 3, reference_geocoded_count: 2, coordinate_withdrawn_count: 1 }),
     ]);
     const summary = buildFacilitySummary(data);
 
     expect(summary.areas).toEqual([
-      { area_code: '0101', facility_count: 5, geocoded_count: 3, coordinate_withdrawn_count: 1 },
+      { area_code: '0101', facility_count: 5, geocoded_count: 3, reference_geocoded_count: 2, coordinate_withdrawn_count: 1 },
     ]);
   });
 
@@ -134,11 +137,21 @@ describe('buildAreaShard / buildFacilitySummary handle missing-field patterns', 
   it('handles a facility without coordinates (unmatched/candidate_only)', () => {
     const facility = makeFacility({ match_status: 'unmatched' });
     delete (facility as Partial<typeof facility>).coordinates;
+    delete (facility as Partial<typeof facility>).coordinate_source;
     const area = makeArea('0101', { facilities: [facility], geocoded_count: 0 });
 
     const shard = buildAreaShard(area);
     expect('coordinates' in shard.facilities[0]).toBe(false);
     expect(shard.geocoded_count).toBe(0);
+  });
+
+  it('handles a facility whose coordinates came from 医療情報ネット instead of P04 (M13)', () => {
+    const facility = makeFacility({ match_status: 'unmatched', coordinate_source: 'iryojoho' });
+    const area = makeArea('0101', { facilities: [facility], reference_geocoded_count: 1 });
+
+    const shard = buildAreaShard(area);
+    expect(shard.facilities[0].coordinate_source).toBe('iryojoho');
+    expect(shard.reference_geocoded_count).toBe(1);
   });
 
   it('handles values with nulls mixed in (non-observed metrics)', () => {

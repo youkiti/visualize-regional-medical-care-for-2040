@@ -263,6 +263,7 @@ function makeFacility(overrides: Partial<Facility> = {}): Facility {
     functions: ['地域支援', '三次救急'],
     match_status: 'matched',
     coordinates: [140.7301711, 41.80541985],
+    coordinate_source: 'ksj_p04',
     ...overrides,
   };
 }
@@ -275,6 +276,7 @@ function makeShard(overrides: Partial<FacilityShard> = {}): FacilityShard {
     pref_name: '北海道',
     facility_count: 1,
     geocoded_count: 1,
+    reference_geocoded_count: 0,
     coordinate_withdrawn_count: 0,
     facilities: [makeFacility()],
     ...overrides,
@@ -305,6 +307,13 @@ const FACILITY_SUMMARY_METADATA: FacilitySummaryMetadata = {
     page_url: 'https://example.test/geo-page',
     derived_via: [],
   },
+  geo_audit_source: {
+    name: '付与済み医療機関座標 × 医療情報ネットの公表座標の検算',
+    inputs: [],
+    page_url: 'https://example.test/geo-audit-page',
+    reference_snapshot_date: '2025-06-01',
+    derived_via: [],
+  },
   processing: {
     script: 'tools/build_web_facilities.py',
     inputs: [],
@@ -314,6 +323,8 @@ const FACILITY_SUMMARY_METADATA: FacilitySummaryMetadata = {
       facility_observations: 'facility_observationsの注記',
       facility_functions: 'facility_functionsの注記',
       facility_geo_linkage: 'facility_geo_linkageの注記',
+      facility_geo_audit: 'facility_geo_auditの注記',
+      coordinate_adoption: 'coordinate_adoptionの注記',
     },
   },
   fields: {},
@@ -744,14 +755,14 @@ describe('buildFacilityCsv', () => {
     const lines = text.split('\r\n');
     const headerLine = lines.find((l) => l.startsWith('published_fy,'))!;
     expect(headerLine).toBe(
-      'published_fy,area_code,area_name,pref_code,pref_name,record_id,facility_name,municipality,metric,bed_function,value,value_status,value_status_label,functions,match_status,lon,lat'
+      'published_fy,area_code,area_name,pref_code,pref_name,record_id,facility_name,municipality,metric,bed_function,value,value_status,value_status_label,functions,match_status,coordinate_source,lon,lat'
     );
 
     const dataRows = lines.filter((l) => l.startsWith('R7,0101,'));
     expect(dataRows).toHaveLength(3); // 1施設 x 3指標
 
     expect(dataRows[0]).toBe(
-      'R7,0101,南渡島,01,北海道,R7-0101-14,市立函館病院,函館市,病床数,休棟中等含む計,582,observed,実測値,地域支援;三次救急,matched,140.7301711,41.80541985'
+      'R7,0101,南渡島,01,北海道,R7-0101-14,市立函館病院,函館市,病床数,休棟中等含む計,582,observed,実測値,地域支援;三次救急,matched,ksj_p04,140.7301711,41.80541985'
     );
   });
 
@@ -767,13 +778,14 @@ describe('buildFacilityCsv', () => {
 
     const ambulanceRow = text.split('\r\n').find((l) => l.includes(',救急車の受入件数,'))!;
     expect(ambulanceRow).toBe(
-      'R7,0101,南渡島,01,北海道,R7-0101-14,市立函館病院,函館市,救急車の受入件数,,,not_disclosed,非公表（NDBの利用に関するガイドラインにより一部非公表）,地域支援;三次救急,matched,140.7301711,41.80541985'
+      'R7,0101,南渡島,01,北海道,R7-0101-14,市立函館病院,函館市,救急車の受入件数,,,not_disclosed,非公表（NDBの利用に関するガイドラインにより一部非公表）,地域支援;三次救急,matched,ksj_p04,140.7301711,41.80541985'
     );
   });
 
-  it('leaves lon/lat blank for a facility without coordinates, and functions blank when absent (位置の推測はしない)', () => {
+  it('leaves lon/lat/coordinate_source blank for a facility without coordinates, and functions blank when absent (位置の推測はしない)', () => {
     const facility = makeFacility({ record_id: 'R7-0101-99', match_status: 'unmatched' });
     delete (facility as Partial<Facility>).coordinates;
+    delete (facility as Partial<Facility>).coordinate_source;
     delete (facility as Partial<Facility>).functions;
     const shard = makeShard({ facilities: [facility], facility_count: 1, geocoded_count: 0 });
 
@@ -786,11 +798,33 @@ describe('buildFacilityCsv', () => {
 
     const row = text.split('\r\n').find((l) => l.startsWith('R7,0101,') && l.includes('R7-0101-99') && l.includes('病床数,休棟中等含む計'))!;
     expect(row).toBe(
-      'R7,0101,南渡島,01,北海道,R7-0101-99,市立函館病院,函館市,病床数,休棟中等含む計,582,observed,実測値,,unmatched,,'
+      'R7,0101,南渡島,01,北海道,R7-0101-99,市立函館病院,函館市,病床数,休棟中等含む計,582,observed,実測値,,unmatched,,,'
     );
   });
 
-  it('includes both source blocks (facility_observations + geo_linkage) in the preamble', () => {
+  it('records coordinate_source="iryojoho" for a facility whose coordinates came from 医療情報ネット (M13)', () => {
+    const facility = makeFacility({
+      record_id: 'R7-0101-18',
+      match_status: 'unmatched',
+      coordinates: [140.77362, 41.788897],
+      coordinate_source: 'iryojoho',
+    });
+    const shard = makeShard({ facilities: [facility], facility_count: 1, geocoded_count: 1 });
+
+    const { text } = buildFacilityCsv({
+      shard,
+      metrics: FACILITY_METRICS,
+      valueStatusLabels: VALUE_STATUS_LABELS,
+      facilitySummaryMetadata: FACILITY_SUMMARY_METADATA,
+    });
+
+    const row = text.split('\r\n').find((l) => l.includes('病床数,休棟中等含む計'))!;
+    expect(row).toBe(
+      'R7,0101,南渡島,01,北海道,R7-0101-18,市立函館病院,函館市,病床数,休棟中等含む計,582,observed,実測値,地域支援;三次救急,unmatched,iryojoho,140.77362,41.788897'
+    );
+  });
+
+  it('includes all three source blocks (facility_observations + P04 geo_linkage + 医療情報ネット geo_audit) in the preamble', () => {
     const shard = makeShard();
 
     const { text } = buildFacilityCsv({
@@ -802,9 +836,16 @@ describe('buildFacilityCsv', () => {
 
     expect(text).toContain('原典ファイル: R7/001723127.xlsx（SHA-256: cccc）');
     expect(text).toContain('掲載ページ: https://example.test/facility-page');
-    expect(text).toContain('座標の出典: facility_basic.csv × P04-20のレコードリンケージ / https://example.test/geo-page');
+    expect(text).toContain(
+      '座標の出典（国土数値情報P04との名寄せ）: facility_basic.csv × P04-20のレコードリンケージ / https://example.test/geo-page'
+    );
+    expect(text).toContain(
+      '座標の出典（医療情報ネット、P04名寄せで座標が得られなかった施設のみ）: 付与済み医療機関座標 × 医療情報ネットの公表座標の検算 / ' +
+        'https://example.test/geo-audit-page（参照時点: 2025-06-01）'
+    );
     expect(text).toContain('注記: facility_observationsの注記');
-    expect(text).toContain('注記（座標）: facility_geo_linkageの注記');
+    expect(text).toContain('注記（座標・P04名寄せ）: facility_geo_linkageの注記');
+    expect(text).toContain('注記（座標源の採用方針）: coordinate_adoptionの注記');
     expect(text).toContain('出力条件: 対象=構想区域 0101 南渡島（北海道）の医療機関 1件 × 3指標');
   });
 });

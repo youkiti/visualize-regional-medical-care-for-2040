@@ -542,6 +542,7 @@ export default function App() {
               onRetryFacilities={retryFacilities}
               facilityMetrics={facilitySummary.metrics}
               facilityValueStatusLabels={facilitySummary.value_status_labels}
+              facilityReferenceSnapshotDate={facilitySummary.metadata.geo_audit_source.reference_snapshot_date}
               onDownloadAreaDetail={handleDownloadAreaDetail}
               onDownloadFacilities={handleDownloadFacilities}
               flowStatus={flowStatus}

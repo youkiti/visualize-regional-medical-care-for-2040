@@ -102,8 +102,13 @@ const EXPECTED_MATCHED_TOTAL = 10244;
 // うち、医療情報ネットの公表座標との検算で1km以上離れていたため座標を出さない件数
 // （doc/FACILITY_GEO_AUDIT.md / doc/DECISION_FACILITY_COORDINATES.md）。
 const EXPECTED_COORDINATE_WITHDRAWN_TOTAL = 76;
-// 実際に地図へ点として出る件数。
-const EXPECTED_GEOCODED_TOTAL = EXPECTED_MATCHED_TOTAL - EXPECTED_COORDINATE_WITHDRAWN_TOTAL;
+// M13: P04名寄せで座標が得られなかった施設のうち、医療情報ネットの公表座標を
+// 座標源として採用した件数（facility_geo_audit.csvのreference_status=='unique'、
+// coordinate_source==='iryojoho'）。
+const EXPECTED_REFERENCE_GEOCODED_TOTAL = 758;
+// 実際に地図へ点として出る件数。座標源は2系統（P04名寄せ由来+医療情報ネット由来）の合計。
+const EXPECTED_GEOCODED_TOTAL =
+  EXPECTED_MATCHED_TOTAL - EXPECTED_COORDINATE_WITHDRAWN_TOTAL + EXPECTED_REFERENCE_GEOCODED_TOTAL;
 const EXPECTED_YOY_FUNCTIONS = ['total', 'high_acute', 'acute', 'recovery', 'chronic'];
 // 339区域 × directions(2) × phases(3)。area_flow_R7.json のグループ総数
 // （tools/build_web_flow.py の検証13と同じ数）。
@@ -365,6 +370,7 @@ function main() {
   let totalFacilityCount = 0;
   let totalGeocodedCount = 0;
   let totalWithdrawnCount = 0;
+  let totalReferenceGeocodedCount = 0;
   for (const area of facilityAreas) {
     if (!Array.isArray(area.facilities) || area.facilities.length !== area.facility_count) {
       fail(
@@ -377,6 +383,7 @@ function main() {
 
     let actualGeocoded = 0;
     let actualWithdrawn = 0;
+    let actualReferenceGeocoded = 0;
     for (const facility of area.facilities) {
       if (facility.values.length !== facilityMetricsCount || facility.value_status.length !== facilityMetricsCount) {
         fail(
@@ -415,10 +422,25 @@ function main() {
 
       if ('coordinates' in facility) {
         actualGeocoded += 1;
-        if (facility.match_status !== 'matched') {
+        // M13: 座標源は2系統。'ksj_p04'=P04名寄せ由来（match_status==='matched'の
+        // はず）、'iryojoho'=P04名寄せでは座標が得られず医療情報ネットの公表座標を
+        // 採用したもの（match_statusは通常'matched'ではないが、座標の有無を
+        // match_statusから導かない — CLAUDE.md罠36 — ためここではcoordinate_source
+        // 自体の整合のみを見る）。
+        if (facility.coordinate_source === 'ksj_p04') {
+          if (facility.match_status !== 'matched') {
+            fail(
+              `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} has ` +
+                `coordinate_source="ksj_p04" but match_status=${JSON.stringify(facility.match_status)} (expected "matched")`
+            );
+          }
+        } else if (facility.coordinate_source === 'iryojoho') {
+          actualReferenceGeocoded += 1;
+        } else {
           fail(
             `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} has ` +
-              `coordinates but match_status=${JSON.stringify(facility.match_status)} (expected "matched")`
+              `coordinates but coordinate_source=${JSON.stringify(facility.coordinate_source)} ` +
+              '(expected "ksj_p04" or "iryojoho")'
           );
         }
         const coords = facility.coordinates;
@@ -433,6 +455,11 @@ function main() {
               `non-finite/malformed coordinates: ${JSON.stringify(coords)}`
           );
         }
+      } else if (facility.coordinate_source !== undefined) {
+        fail(
+          `area_facilities_R7.json: facility ${facility.record_id} in area ${area.area_code} has ` +
+            'coordinate_source but no coordinates'
+        );
       }
     }
 
@@ -449,8 +476,16 @@ function main() {
           `coordinate_withdrawn (${actualWithdrawn})`
       );
     }
+    if (actualReferenceGeocoded !== area.reference_geocoded_count) {
+      fail(
+        `area_facilities_R7.json: area ${area.area_code} reference_geocoded_count ` +
+          `(${area.reference_geocoded_count}) does not match the number of facilities with ` +
+          `coordinate_source==="iryojoho" (${actualReferenceGeocoded})`
+      );
+    }
     totalGeocodedCount += area.geocoded_count;
     totalWithdrawnCount += area.coordinate_withdrawn_count;
+    totalReferenceGeocodedCount += area.reference_geocoded_count;
   }
 
   if (totalFacilityCount !== EXPECTED_FACILITY_TOTAL) {
@@ -471,10 +506,21 @@ function main() {
         `${EXPECTED_COORDINATE_WITHDRAWN_TOTAL}, got ${totalWithdrawnCount}`
     );
   }
-  if (totalGeocodedCount + totalWithdrawnCount !== EXPECTED_MATCHED_TOTAL) {
+  if (totalReferenceGeocodedCount !== EXPECTED_REFERENCE_GEOCODED_TOTAL) {
     fail(
-      'area_facilities_R7.json: geocoded + withdrawn must equal the number of name-matched facilities ' +
-        `(${EXPECTED_MATCHED_TOTAL}), got ${totalGeocodedCount + totalWithdrawnCount}`
+      'area_facilities_R7.json: total reference_geocoded_count across areas must be exactly ' +
+        `${EXPECTED_REFERENCE_GEOCODED_TOTAL}, got ${totalReferenceGeocodedCount}`
+    );
+  }
+  // P04名寄せ由来分（totalGeocodedCountから医療情報ネット由来分を除いたもの）+
+  // withdrawnが、P04名寄せの一致件数(EXPECTED_MATCHED_TOTAL)と一致するはず
+  // （医療情報ネット由来はP04名寄せの一致/不一致とは独立に加わるため、
+  // totalGeocodedCountをそのまま使うと二重に数えてしまう）。
+  const totalP04Geocoded = totalGeocodedCount - totalReferenceGeocodedCount;
+  if (totalP04Geocoded + totalWithdrawnCount !== EXPECTED_MATCHED_TOTAL) {
+    fail(
+      'area_facilities_R7.json: P04由来のgeocoded (geocoded - reference_geocoded) + withdrawn must equal ' +
+        `the number of name-matched facilities (${EXPECTED_MATCHED_TOTAL}), got ${totalP04Geocoded + totalWithdrawnCount}`
     );
   }
   // --- end area_facilities_R7.json validation ---------------------------

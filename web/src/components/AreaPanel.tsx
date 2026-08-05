@@ -56,6 +56,11 @@ interface AreaPanelProps {
   onRetryFacilities: () => void;
   facilityMetrics: FacilityMetric[];
   facilityValueStatusLabels: Record<FacilityValueStatus, string>;
+  /** facility_summary.jsonのmetadata.geo_audit_source.reference_snapshot_date（'2025-06-01'）。
+   * FacilityListの医療情報ネット由来バッジ・カバレッジ行に使う。CSV(buildFacilityCsv)・
+   * SourceNotesと同じくmetadata由来にし、コンポーネントに日付リテラルを持たせない
+   * （M13 must-fix、参照時点が変わってもここだけ食い違わないようにする）。 */
+  facilityReferenceSnapshotDate: string;
   /** この区域の指標（基礎情報・病床・医療需要推計）をCSVでダウンロードする（lib/downloads.ts buildAreaDetailCsv）。 */
   onDownloadAreaDetail: () => void;
   /** この区域の医療機関一覧をCSVでダウンロードする（lib/downloads.ts buildFacilityCsv）。FacilityListへそのまま渡す。 */
@@ -100,6 +105,7 @@ export default function AreaPanel({
   onRetryFacilities,
   facilityMetrics,
   facilityValueStatusLabels,
+  facilityReferenceSnapshotDate,
   onDownloadAreaDetail,
   onDownloadFacilities,
   flowStatus,
@@ -342,6 +348,7 @@ export default function AreaPanel({
         onRetry={onRetryFacilities}
         metrics={facilityMetrics}
         valueStatusLabels={facilityValueStatusLabels}
+        referenceSnapshotDate={facilityReferenceSnapshotDate}
         onDownloadFacilities={onDownloadFacilities}
       />
 

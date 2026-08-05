@@ -279,11 +279,26 @@ function formatFlowTooltipBody(areaCode: string, overlay: FlowOverlay, rateLooku
   return `${overlay.directionLabel}として ${formatPercent(rate, 1)}`;
 }
 
-/** 施設ホバーのツールチップ本文（1行）。beds_totalは観測値の施設にしか無いキーなので存在チェックする。 */
+/**
+ * 施設ホバーのツールチップ本文（1行）。beds_totalは観測値の施設にしか無いキーなので
+ * 存在チェックする。地図の点そのものは座標の出所で描き分けない(原典に無い「質の
+ * 違い」を示唆しないため)が、出所自体はツールチップで示す(brief記載どおり)。
+ * 既定の出所(P04名寄せ由来='ksj_p04')は無印のまま(従来どおり)、医療情報ネット由来
+ * (='iryojoho'。P04名寄せで座標が得られなかった施設を補完したもの、M13)のときだけ
+ * 出所を明示する(FacilityList.tsxのバッジと同じ設計)。参照時点（'2025-06-01'）は
+ * ここでは出さない: MapViewはfacility_summary.jsonのmetadataを持たず、日付リテラルを
+ * ハードコードすると参照時点が変わったときに静かに嘘になる（M13 must-fix）。
+ * 正確な参照時点はFacilityListのバッジ（metadata由来）とSourceNotes・CSVが持つ。
+ */
 function formatFacilityTooltipBody(props: FacilityPointProperties): string {
   const bedsText =
     props.beds_total === undefined ? '病床数（休棟中等含む計） —' : `病床数（休棟中等含む計） ${formatInteger(props.beds_total)} 床`;
-  return props.municipality ? `${props.municipality} ・ ${bedsText}` : bedsText;
+  const parts = [bedsText];
+  if (props.coordinate_source === 'iryojoho') {
+    parts.push('座標: 医療情報ネット');
+  }
+  const body = parts.join(' ・ ');
+  return props.municipality ? `${props.municipality} ・ ${body}` : body;
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
