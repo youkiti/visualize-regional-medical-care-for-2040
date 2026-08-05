@@ -13,7 +13,9 @@
   - 病床機能別（高度急性期/急性期/回復期/慢性期）の病床数と将来必要量の比較
   - 在宅（訪問診療）・外来の医療需要推計（2024→2050年度、年度スライダー）
   - 医療機関別の病床数・診療実績・医師数
-- **CSV ダウンロード**: 表示条件で絞り込んだ CSV と、加工済みデータセットの一括ダウンロード（出典メタデータ同梱）
+- **CSV ダウンロード**:
+  - 表示条件で絞り込んだ CSV（3種、いずれも由来ヘッダー付き）: 地図に表示中の指標を全339区域ぶん／選択区域1つの基礎情報・病床・医療需要推計／選択区域の医療機関一覧×21指標
+  - 加工済みデータセットの一括ダウンロード: `data/processed/` の CSV 13本＋各 `.meta.json`＋`README.md`＋`MANIFEST.tsv` を1本の ZIP にまとめて配布（出典メタデータ・SHA-256 同梱）
 
 詳細は [doc/REQUIREMENTS.md](doc/REQUIREMENTS.md) を参照。
 
@@ -28,7 +30,7 @@
 | `SHA256SUMS` | 生データの SHA-256 ハッシュ（完全性検証用） |
 | `doc/` | ドキュメント（[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)） |
 | `data/processed/` | 加工済みデータ（構想区域境界 GeoJSON、都道府県別・構想区域別病床数等の CSV/JSON。ファイル内 or 同名 `.meta.json` に由来メタデータ同梱） |
-| `web/` | 可視化サイト本体（Vite + React + MapLibre GL）。`data/processed/` を正本として `npm run dev`/`build` 時に表示用データを自動生成する |
+| `web/` | 可視化サイト本体（Vite + React + MapLibre GL）。`data/processed/` を正本として `npm run dev`/`build` 時に表示用データ（一括ダウンロード用 ZIP を含む）を自動生成する |
 
 ## 可視化サイトをローカルで動かす
 
@@ -85,5 +87,7 @@ npm run dev
 - [x] 地理データ突合（構想区域 × 二次医療圏境界、[doc/JOIN_VERIFICATION.md](doc/JOIN_VERIFICATION.md)）と可視化用境界 GeoJSON 生成（`data/processed/area_boundaries_R7.geojson`）
 - [x] 可視化サイト実装（Vite + React + MapLibre GL、339構想区域のコロプレス表示、`web/`）
 - [x] GitHub Actions によるビルド・Pages デプロイ（[.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml)）
-- [ ] Excel パーサ: 医療機関別・需要推計・流入流出（未実装）
-- [ ] CSV ダウンロード機能（未実装）
+- [x] Excel パーサ: 医療需要推計（`tools/parse_demand_forecast.py` → `data/processed/demand_*.csv`）
+- [x] Excel パーサ: 医療機関別の病床数・診療実績等（`tools/parse_facility_beds.py` → `data/processed/facility_*.csv`）と国土数値情報 P04 との名寄せ（[doc/FACILITY_LINKAGE.md](doc/FACILITY_LINKAGE.md)）
+- [x] CSV ダウンロード（表示条件で絞り込んだ CSV 3種と、加工済みデータセットの一括 ZIP）
+- [ ] Excel パーサ: 流入流出（001723366、未実装）
