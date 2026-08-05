@@ -1,10 +1,22 @@
-import type { AreaDemandMetadata, AreaIndicatorsMetadata, AreaYoyMetadata, FacilitySummaryMetadata, KnownIssue } from '../types';
+import type {
+  AreaDemandMetadata,
+  AreaFlowMetadata,
+  AreaIndicatorsMetadata,
+  AreaYoyMetadata,
+  FacilitySummaryMetadata,
+  KnownIssue,
+  PrefectureIndicatorsMetadata,
+} from '../types';
 
 interface SourceNotesProps {
   metadata: AreaIndicatorsMetadata;
   demandMetadata: AreaDemandMetadata;
   facilityMetadata: FacilitySummaryMetadata;
   yoyMetadata: AreaYoyMetadata;
+  /** area_flow.json は遅延取得(区域を選ぶまで取得しない)のため、未取得時はnull
+   * （その間は「患者の流入・流出」の出典ブロックそのものを描画しない）。 */
+  flowMetadata: AreaFlowMetadata | null;
+  prefectureMetadata: PrefectureIndicatorsMetadata;
 }
 
 /**
@@ -34,7 +46,14 @@ function KnownIssues({ issues, label }: { issues: KnownIssue[]; label: string })
   );
 }
 
-export default function SourceNotes({ metadata, demandMetadata, facilityMetadata, yoyMetadata }: SourceNotesProps) {
+export default function SourceNotes({
+  metadata,
+  demandMetadata,
+  facilityMetadata,
+  yoyMetadata,
+  flowMetadata,
+  prefectureMetadata,
+}: SourceNotesProps) {
   const { source, processing, known_issues: knownIssues } = metadata;
   const demandSource = demandMetadata.source;
   // AreaDemandProcessing.caveat is an object with 2 keys (demand_forecast/
@@ -51,6 +70,12 @@ export default function SourceNotes({ metadata, demandMetadata, facilityMetadata
   const facilitySource = facilityMetadata.source;
   const geoLinkageSource = facilityMetadata.geo_linkage_source;
   const facilityCaveat = facilityMetadata.processing.caveat;
+  // 都道府県(概観レイヤ)のmetadataは `source` が無く、source_beds/source_demand の
+  // 2ブロックに分かれている。caveatも3キー(beds/demand_forecast/demand_population)で、
+  // ここまでの3データセットのどれとも形が違う(types.ts参照)。
+  const prefBedsSource = prefectureMetadata.source_beds;
+  const prefDemandSource = prefectureMetadata.source_demand;
+  const prefCaveat = prefectureMetadata.processing.caveat;
 
   // 年度間比較(R6→R7)のうち「2024年実績はR6公表分を採用した」という判断は
   // known_issuesの1件として記録されている(area_yoy_2024_actual_from_r6)。
@@ -212,6 +237,131 @@ export default function SourceNotes({ metadata, demandMetadata, facilityMetadata
       </dl>
 
       <KnownIssues issues={facilityMetadata.known_issues} label="データの既知の問題（医療機関）" />
+
+      <h3>出典・注記（都道府県／概観レイヤ）</h3>
+
+      <p className="caveat">
+        <strong>病床について: </strong>
+        {prefCaveat.beds}
+      </p>
+      <p className="caveat">
+        <strong>医療需要推計について: </strong>
+        {prefCaveat.demand_forecast}
+      </p>
+      <p className="caveat">
+        <strong>人口（参考情報）について: </strong>
+        {prefCaveat.demand_population}
+      </p>
+
+      <p>
+        <strong>病床の出典（都道府県別の公表値）</strong>
+      </p>
+      <dl>
+        <dt>データ名</dt>
+        <dd>{prefBedsSource.name}</dd>
+        <dt>公表元</dt>
+        <dd>{prefBedsSource.publisher}</dd>
+        <dt>公表年度</dt>
+        <dd>{prefBedsSource.fiscal_year}</dd>
+        <dt>ファイル</dt>
+        <dd>
+          <a href={prefBedsSource.url} target="_blank" rel="noreferrer">
+            {prefBedsSource.url}
+          </a>
+        </dd>
+        <dt>掲載ページ</dt>
+        <dd>
+          <a href={prefBedsSource.page_url} target="_blank" rel="noreferrer">
+            {prefBedsSource.page_url}
+          </a>
+        </dd>
+        <dt>取得日</dt>
+        <dd>{prefBedsSource.acquired_date}</dd>
+        <dt>利用規約</dt>
+        <dd>{prefBedsSource.license}</dd>
+      </dl>
+
+      <p>
+        <strong>医療需要推計の出典（構想区域単位の公表値を本サイトが合計）</strong>
+      </p>
+      <dl>
+        <dt>データ名</dt>
+        <dd>{prefDemandSource.name}</dd>
+        <dt>公表元</dt>
+        <dd>{prefDemandSource.publisher}</dd>
+        <dt>公表年度</dt>
+        <dd>{prefDemandSource.fiscal_year}</dd>
+        <dt>ファイル</dt>
+        <dd>
+          <a href={prefDemandSource.url} target="_blank" rel="noreferrer">
+            {prefDemandSource.url}
+          </a>
+        </dd>
+        <dt>取得日</dt>
+        <dd>{prefDemandSource.acquired_date}</dd>
+        <dt>利用規約</dt>
+        <dd>{prefDemandSource.license}</dd>
+      </dl>
+
+      <p>
+        <strong>都道府県境界の出典</strong>
+        <br />
+        構想区域境界（国土数値情報 医療圏データ A38-20 由来）を都道府県コードでディゾルブして作成。
+        国土数値情報の都道府県界を別途取得したものではないため、県境は必ず構想区域境界の部分集合になる。
+        三重県の8構想区域の境界は市区町村界からの合成派生物だが、ディゾルブで消えるのは区域どうしの
+        内部境界であり、県の外形（＝構成市町の和集合）には影響しない。「全国」は境界を持たず、
+        都道府県を選んだときの参考値としてのみ表示している。
+      </p>
+
+      <KnownIssues issues={prefectureMetadata.known_issues} label="データの既知の問題（都道府県）" />
+
+      {/* flowMetadataはarea_flow.jsonの遅延取得(区域を選ぶまでfetchしない)分、
+          区域未選択の間はnull — その間はブロックごと出さない(brief記載どおり)。
+          processing.caveatはpatient_flow/patient_flow_totalの2キーのオブジェクトで、
+          AreaDemandProcessing.caveat(demand_forecast/demand_population)ともキー名が
+          異なる別の形(CLAUDE.md罠11)のため、demandブロックと同じ流儀で2つとも
+          個別に描画する。 */}
+      {flowMetadata && (
+        <>
+          <h3>出典・注記（患者の流入・流出）</h3>
+
+          <p className="caveat">
+            <strong>流入率・流出率について: </strong>
+            {flowMetadata.processing.caveat.patient_flow}
+          </p>
+          <p className="caveat">
+            <strong>全体の流入率・流出率について: </strong>
+            {flowMetadata.processing.caveat.patient_flow_total}
+          </p>
+
+          <dl>
+            <dt>データ名</dt>
+            <dd>{flowMetadata.source.name}</dd>
+            <dt>公表元</dt>
+            <dd>{flowMetadata.source.publisher}</dd>
+            <dt>公表年度</dt>
+            <dd>{flowMetadata.source.fiscal_year}</dd>
+            <dt>ファイル</dt>
+            <dd>
+              <a href={flowMetadata.source.url} target="_blank" rel="noreferrer">
+                {flowMetadata.source.url}
+              </a>
+            </dd>
+            <dt>掲載ページ</dt>
+            <dd>
+              <a href={flowMetadata.source.page_url} target="_blank" rel="noreferrer">
+                {flowMetadata.source.page_url}
+              </a>
+            </dd>
+            <dt>取得日</dt>
+            <dd>{flowMetadata.source.acquired_date}</dd>
+            <dt>利用規約</dt>
+            <dd>{flowMetadata.source.license}</dd>
+          </dl>
+
+          <KnownIssues issues={flowMetadata.known_issues} label="データの既知の問題（患者の流入・流出）" />
+        </>
+      )}
 
       <h3>出典・注記（公表年度間の比較 R6→R7）</h3>
 

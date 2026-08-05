@@ -25,7 +25,7 @@ package.json等には一切触れない。
 検証1〜8:
   1. area_beds.csv / area_basic.csv は published_fy == 'R7' の行だけに絞り込んでから
      以降の検証・抽出を行う(両CSVともR6/R7が published_fy で並存するようになった
-     [M7]ため)。絞り込み後に0行ならSystemExitで中断する
+     [M9]ため)。絞り込み後に0行ならSystemExitで中断する
   2. (area_code, bed_function, series, year) に重複がない
   3. area_beds.csv / area_basic.csv / area_boundaries_R7.geojson の area_code
      集合が3つとも完全一致し、要素数がちょうど339
@@ -151,7 +151,7 @@ def _r7_source(meta: dict, label: str) -> dict:
     """`<csv>.meta.json` の `source` から published_fy=='R7' の要素を返す。
 
     area_beds.csv・area_basic.csvはR6/R7が published_fy で並存するように
-    なった(M7)ため `source` がリストになっている。本データセット
+    なった(M9)ため `source` がリストになっている。本データセット
     (area_indicators_R7.json)はR7のみで構成されるため、R7の出典情報だけを
     取り出す。
     """
@@ -167,7 +167,7 @@ def _filter_known_issues_for_r7(issues: list) -> list:
     当てはまるため残す。
 
     area_beds.csv.meta.json・area_basic.csv.meta.json はR6/R7が並存するように
-    なった(M7)ため、R7行のみで構成される本データセットには当てはまらない
+    なった(M9)ため、R7行のみで構成される本データセットには当てはまらない
     R6限定の既知欠陥(area_beds_r6_2015_actual_missing_minamihiyama・
     area_basic_r6_net_flow_rate_different_concept)が混ざっている。画面の
     出典欄に出すと利用者を誤誘導するため、ここで絞り込む。
@@ -183,7 +183,7 @@ def validate_and_index(beds_rows, basic_rows, geo_codes):
       basic_by_code: {area_code: row(dict)}
     """
     # 検証1: published_fy == 'R7' の行だけに絞り込む(area_beds.csv・area_basic.csv
-    # ともにR6/R7が published_fy で並存するようになった[M7]ため、まずこの
+    # ともにR6/R7が published_fy で並存するようになった[M9]ため、まずこの
     # データセットが対象とするR7行だけに絞ってから以降の検証・抽出を行う)。
     beds_rows = [r for r in beds_rows if r["published_fy"] == "R7"]
     if not beds_rows:

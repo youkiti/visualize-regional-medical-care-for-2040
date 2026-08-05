@@ -1,7 +1,14 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 
-import type { AreaMapFeatureProperties, BedFunctionKey, DemandCategoryKey, MetricKind } from '../types';
+import type {
+  AreaMapFeatureProperties,
+  BedFunctionKey,
+  DemandCategoryKey,
+  MapLevel,
+  MetricKind,
+  PrefectureMapFeatureProperties,
+} from '../types';
 import {
   DEMAND_RATIO_BIN_EDGES,
   RATIO_BIN_COLORS,
@@ -15,6 +22,7 @@ import {
   formatChangeRatio,
   formatInteger,
   formatMetricValue,
+  formatPercent,
   formatReceipts,
   formatYoyChangeRatio,
   formatYoyRatio,
@@ -30,6 +38,7 @@ import {
   yoyPlanRatioKey,
   yoyPlanValueKey,
 } from '../lib/metrics';
+import { buildFlowFillColor, buildFlowRateLookup, type FlowOverlay } from '../lib/flowMap';
 import { EMPTY_FACILITY_POINTS, type FacilityPointFeatureCollection, type FacilityPointProperties } from '../lib/facilityPoints';
 
 // 沖縄県〜北海道を含む初期表示範囲。東京都島しょ部(小笠原諸島・南鳥島)は範囲外
@@ -52,6 +61,40 @@ const LAYER_OUTLINE = 'area-outline';
 const LAYER_HOVER_OUTLINE = 'area-hover-outline';
 const LAYER_SELECTED_OUTLINE = 'area-selected-outline';
 
+// 概観レイヤ(47都道府県)。区域レイヤと同じ構成のレイヤ群を持ち、level に応じて
+// visibility で排他表示する(ソースやレイヤを足し引きしない— 罠5と同種の
+// StrictMode対策の作法)。pref-border は例外で、**区域表示中に**県境だけを
+// 太線で重ねるためのレイヤ。
+const PREF_SOURCE_ID = 'prefectures';
+const LAYER_PREF_COAST_CASING = 'pref-coast-casing';
+const LAYER_PREF_FILL = 'pref-fill';
+const LAYER_PREF_UNAVAILABLE_OUTLINE = 'pref-unavailable-outline';
+const LAYER_PREF_OUTLINE = 'pref-outline';
+const LAYER_PREF_BORDER = 'pref-border';
+const LAYER_PREF_HOVER_OUTLINE = 'pref-hover-outline';
+const LAYER_PREF_SELECTED_OUTLINE = 'pref-selected-outline';
+
+// 区域表示中に重ねる県境の色。区域境界(白・0.6px)より濃く太くして階層を
+// 見分けられるようにしつつ、hover/selected の輪郭(#0b0b0b)とは別の色にして
+// 「選択中の区域」と混同させない。
+const PREF_BORDER_COLOR = '#4a5b6a';
+
+// 県境の線幅はズームに追随させる。全国表示(zoom 4前後)で固定1.2pxにすると、
+// 47本の県境が塗りの上に重なって地図全体が暗く濁る(区域の色の読み取りを
+// 邪魔する)。逆に県へズームインしたときは、区域境界(白0.6px)との階層差が
+// 分かる太さが要る。
+const PREF_BORDER_WIDTH_EXPRESSION: unknown = [
+  'interpolate',
+  ['linear'],
+  ['zoom'],
+  4,
+  0.5,
+  6,
+  1.0,
+  8,
+  1.8,
+];
+
 // 選択区域の医療機関ポイント。ソースは空のFeatureCollectionでスタイル定義時に
 // 一度だけ追加し、以後は setData() で更新する(ソースを足し引きしない— 罠5と
 // 同種のStrictMode対策の作法)。レイヤは区域レイヤ群より上に置く。
@@ -59,6 +102,7 @@ const FACILITIES_SOURCE_ID = 'facilities';
 const LAYER_FACILITY_POINTS = 'facility-points';
 
 const NO_MATCH_FILTER: maplibregl.FilterSpecification = ['==', ['get', 'area_code'], ''];
+const PREF_NO_MATCH_FILTER: maplibregl.FilterSpecification = ['==', ['get', 'pref_code'], ''];
 
 // 病床数(beds_total)による半径のinterpolate。観測値を持たない施設(['has',
 // 'beds_total']がfalse)にも最小半径3pxで点を描く— 欠測を0床として扱わない
@@ -84,20 +128,33 @@ export interface MapViewHandle {
 
 interface MapViewProps {
   mapDataUrl: string;
+  /** generated/pref_map.json の URL（概観レイヤ。区域と同じく MapLibre に fetch させる）。 */
+  prefMapDataUrl: string;
+  /** 表示単位。'pref' のときは都道府県を塗り、'area' のときは区域を塗って県境を線で重ねる。 */
+  level: MapLevel;
   bedFunction: BedFunctionKey;
   metric: MetricKind;
   functionLabel: string;
-  /** computeQuantileEdges() の8値。metric が 'ratio' または需要指標のときは未使用。 */
+  /** computeQuantileEdges() の8値。**現在の level のデータから算出したもの**を渡す
+   * （47都道府県と339区域では分位が別物になるため）。metric が 'ratio' または
+   * 需要指標のときは未使用。 */
   quantileEdges: number[];
   selectedAreaCode: string | null;
   /** 地図クリックで選ばれた区域の area_code（クリックが外れたら null）。 */
   onSelectArea: (areaCode: string | null) => void;
+  selectedPrefCode: string | null;
+  /** 地図クリックで選ばれた都道府県の pref_code（クリックが外れたら null）。 */
+  onSelectPrefecture: (prefCode: string | null) => void;
   /** 需要指標選択中に使う選択年度（西暦）とそのラベル原文。bed指標選択中は未使用。 */
   demandYear: number;
   demandYearLabel: string;
   demandCategoryLabels: Record<DemandCategoryKey, string>;
   /** 選択区域の医療機関ポイント(App側でfacilityShardから組み立て済み)。未選択/未取得時は空のFeatureCollection。 */
   facilityPoints: FacilityPointFeatureCollection;
+  /** 患者の流入・流出オーバーレイ(App.tsx、D2)。非nullのとき、区域の塗り・ツールチップを
+   * 指標用の表示から差し替える。既存の指標用の式の組み立て・ツールチップには一切手を入れない
+   * （flowOverlayがnullのときの挙動は変えない）。 */
+  flowOverlay: FlowOverlay | null;
 }
 
 /** ホバー中のツールチップの種別を区別する。区域と施設のツールチップを同時に
@@ -105,6 +162,7 @@ interface MapViewProps {
  * 乗るため、両方のレイヤが同じ座標でヒットしうる)。 */
 type HoverState =
   | { kind: 'area'; props: AreaMapFeatureProperties; x: number; y: number }
+  | { kind: 'pref'; props: PrefectureMapFeatureProperties; x: number; y: number }
   | { kind: 'facility'; props: FacilityPointProperties; x: number; y: number };
 
 function buildFillColorExpression(
@@ -202,6 +260,25 @@ function formatHoverTooltip(
   return `${functionLabel}: ${formatMetricValue(metric, readMetricValue(props, metric, bedFunction))}`;
 }
 
+/**
+ * 流入・流出オーバーレイ表示中の区域ホバーのツールチップ本文（1行）。
+ * - 選択中の区域自身: 「自区域内で完結: 65.8%」（selfRateがnullなら「—（原典に自区域の行なし）」）
+ * - 相手区域(lookupにある): 「流出先として 7.5%」/「流入元として 7.5%」（directionLabelで出し分け）
+ * - どちらでもない区域: 「原典で非表示（一定数未満のため0%とは限りません）」
+ */
+function formatFlowTooltipBody(areaCode: string, overlay: FlowOverlay, rateLookup: Map<string, number>): string {
+  if (areaCode === overlay.selfCode) {
+    return overlay.selfRate === null
+      ? '自区域内で完結: —（原典に自区域の行なし）'
+      : `自区域内で完結: ${formatPercent(overlay.selfRate, 1)}`;
+  }
+  const rate = rateLookup.get(areaCode);
+  if (rate === undefined) {
+    return '原典で非表示（一定数未満のため0%とは限りません）';
+  }
+  return `${overlay.directionLabel}として ${formatPercent(rate, 1)}`;
+}
+
 /** 施設ホバーのツールチップ本文（1行）。beds_totalは観測値の施設にしか無いキーなので存在チェックする。 */
 function formatFacilityTooltipBody(props: FacilityPointProperties): string {
   const bedsText =
@@ -212,16 +289,21 @@ function formatFacilityTooltipBody(props: FacilityPointProperties): string {
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
     mapDataUrl,
+    prefMapDataUrl,
+    level,
     bedFunction,
     metric,
     functionLabel,
     quantileEdges,
     selectedAreaCode,
     onSelectArea,
+    selectedPrefCode,
+    onSelectPrefecture,
     demandYear,
     demandYearLabel,
     demandCategoryLabels,
     facilityPoints,
+    flowOverlay,
   },
   ref
 ) {
@@ -243,6 +325,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // stale closures without re-creating the map on every prop change.
   const onSelectAreaRef = useRef(onSelectArea);
   onSelectAreaRef.current = onSelectArea;
+  const onSelectPrefectureRef = useRef(onSelectPrefecture);
+  onSelectPrefectureRef.current = onSelectPrefecture;
+  // イベントハンドラは一度だけ登録されるので、level も ref 経由で最新値を読む
+  // (level が変わるたびに地図を作り直さない)。
+  const levelRef = useRef(level);
+  levelRef.current = level;
 
   useEffect(() => {
     if (!containerRef.current) return undefined;
@@ -255,6 +343,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           [SOURCE_ID]: {
             type: 'geojson',
             data: mapDataUrl,
+          },
+          [PREF_SOURCE_ID]: {
+            type: 'geojson',
+            data: prefMapDataUrl,
           },
           // 空のFeatureCollectionで一度だけ追加し、以後はsetData()で更新する
           // (選択区域が変わるたびにソースを足し引きしない)。
@@ -302,6 +394,50 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             source: SOURCE_ID,
             paint: { 'line-color': '#ffffff', 'line-width': 0.6 },
           },
+          // --- 概観レイヤ(47都道府県) ---
+          // 区域レイヤ群の「上」に置く。level==='pref' のときは塗り・ケーシング・
+          // 白縁を出して区域レイヤを隠し、level==='area' のときは
+          // LAYER_PREF_BORDER(県境の線)だけを残して区域の塗りの上に重ねる。
+          // 初期 visibility は下の同期effectが level に合わせて上書きする。
+          {
+            id: LAYER_PREF_COAST_CASING,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            paint: { 'line-color': '#7d93a5', 'line-width': 2.4 },
+          },
+          {
+            id: LAYER_PREF_FILL,
+            type: 'fill',
+            source: PREF_SOURCE_ID,
+            paint: { 'fill-color': RATIO_UNAVAILABLE_COLOR, 'fill-opacity': 1 },
+          },
+          {
+            id: LAYER_PREF_UNAVAILABLE_OUTLINE,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            filter: ['!', ['has', `r_${bedFunction}`]],
+            paint: {
+              'line-color': RATIO_UNAVAILABLE_OUTLINE_COLOR,
+              'line-width': 1,
+              'line-dasharray': [2, 2],
+            },
+          },
+          {
+            id: LAYER_PREF_OUTLINE,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            paint: { 'line-color': '#ffffff', 'line-width': 0.8 },
+          },
+          {
+            id: LAYER_PREF_BORDER,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            paint: {
+              'line-color': PREF_BORDER_COLOR,
+              'line-width': PREF_BORDER_WIDTH_EXPRESSION as maplibregl.PropertyValueSpecification<number>,
+              'line-opacity': 0.85,
+            },
+          },
           {
             id: LAYER_HOVER_OUTLINE,
             type: 'line',
@@ -314,6 +450,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             type: 'line',
             source: SOURCE_ID,
             filter: NO_MATCH_FILTER,
+            paint: { 'line-color': '#0b0b0b', 'line-width': 2.5 },
+          },
+          {
+            id: LAYER_PREF_HOVER_OUTLINE,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            filter: PREF_NO_MATCH_FILTER,
+            paint: { 'line-color': '#0b0b0b', 'line-width': 1.5 },
+          },
+          {
+            id: LAYER_PREF_SELECTED_OUTLINE,
+            type: 'line',
+            source: PREF_SOURCE_ID,
+            filter: PREF_NO_MATCH_FILTER,
             paint: { 'line-color': '#0b0b0b', 'line-width': 2.5 },
           },
           // 選択区域の医療機関ポイント。区域レイヤ群より上に置く。塗りは
@@ -409,6 +559,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (facilityFeature) {
         map.getCanvas().style.cursor = 'pointer';
         map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+        map.setFilter(LAYER_PREF_HOVER_OUTLINE, PREF_NO_MATCH_FILTER);
         setHover({
           kind: 'facility',
           props: facilityFeature.properties as unknown as FacilityPointProperties,
@@ -418,22 +569,45 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         return;
       }
 
-      const areaFeature = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] })[0];
-      if (areaFeature) {
-        map.getCanvas().style.cursor = 'pointer';
-        const code = areaFeature.properties?.area_code as string | undefined;
-        map.setFilter(LAYER_HOVER_OUTLINE, code ? ['==', ['get', 'area_code'], code] : NO_MATCH_FILTER);
-        setHover({
-          kind: 'area',
-          props: areaFeature.properties as unknown as AreaMapFeatureProperties,
-          x: e.point.x,
-          y: e.point.y,
-        });
-        return;
+      // 塗りは level に応じてどちらか一方しか表示していないので、今の level の
+      // 塗りレイヤだけを引く(非表示レイヤは queryRenderedFeatures に出てこないが、
+      // 明示的に分岐して「どちらを指しているか」をコード上でも一意にする)。
+      if (levelRef.current === 'pref') {
+        const prefFeature = map.queryRenderedFeatures(e.point, { layers: [LAYER_PREF_FILL] })[0];
+        if (prefFeature) {
+          map.getCanvas().style.cursor = 'pointer';
+          const code = prefFeature.properties?.pref_code as string | undefined;
+          map.setFilter(
+            LAYER_PREF_HOVER_OUTLINE,
+            code ? ['==', ['get', 'pref_code'], code] : PREF_NO_MATCH_FILTER
+          );
+          setHover({
+            kind: 'pref',
+            props: prefFeature.properties as unknown as PrefectureMapFeatureProperties,
+            x: e.point.x,
+            y: e.point.y,
+          });
+          return;
+        }
+      } else {
+        const areaFeature = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] })[0];
+        if (areaFeature) {
+          map.getCanvas().style.cursor = 'pointer';
+          const code = areaFeature.properties?.area_code as string | undefined;
+          map.setFilter(LAYER_HOVER_OUTLINE, code ? ['==', ['get', 'area_code'], code] : NO_MATCH_FILTER);
+          setHover({
+            kind: 'area',
+            props: areaFeature.properties as unknown as AreaMapFeatureProperties,
+            x: e.point.x,
+            y: e.point.y,
+          });
+          return;
+        }
       }
 
       map.getCanvas().style.cursor = '';
       map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+      map.setFilter(LAYER_PREF_HOVER_OUTLINE, PREF_NO_MATCH_FILTER);
       setHover(null);
     });
 
@@ -443,10 +617,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     map.on('mouseout', () => {
       map.getCanvas().style.cursor = '';
       map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+      map.setFilter(LAYER_PREF_HOVER_OUTLINE, PREF_NO_MATCH_FILTER);
       setHover(null);
     });
 
     map.on('click', (e) => {
+      if (levelRef.current === 'pref') {
+        const feature = map.queryRenderedFeatures(e.point, { layers: [LAYER_PREF_FILL] })[0];
+        const code = feature ? ((feature.properties?.pref_code as string | undefined) ?? null) : null;
+        onSelectPrefectureRef.current(code);
+        return;
+      }
       const feats = map.queryRenderedFeatures(e.point, { layers: [LAYER_FILL] });
       const feature = feats[0];
       const code = feature ? ((feature.properties?.area_code as string | undefined) ?? null) : null;
@@ -461,37 +642,78 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.remove();
       setReady(false);
     };
-    // Map is created once; mapDataUrl is stable for the app's lifetime.
+    // Map is created once; mapDataUrl/prefMapDataUrl are stable for the app's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapDataUrl]);
+  }, [mapDataUrl, prefMapDataUrl]);
 
   // Fill color / unavailable-outline visibility depend on the selected bed
-  // function & metric. Applied imperatively so we don't tear down the map.
+  // function & metric, and which of the two layer sets is on depends on level.
+  // Applied imperatively so we don't tear down the map.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
 
+    const isPref = level === 'pref';
+    const fillLayer = isPref ? LAYER_PREF_FILL : LAYER_FILL;
+    const unavailableLayer = isPref ? LAYER_PREF_UNAVAILABLE_OUTLINE : LAYER_UNAVAILABLE_OUTLINE;
+
+    // flowOverlay非nullのときは指標用の塗りを流入出の式へ差し替える（既存の指標用
+    // 式の組み立てbuildFillColorExpression自体には一切手を入れない — D2）。
+    // 流入出は構想区域単位のデータなので、都道府県層(level==='pref')には適用しない。
+    const useFlowFill = flowOverlay !== null && !isPref;
+
+    // 表示中の層の塗りだけを更新する(隠れている層の塗り式は次に表示へ切り替わる
+    // ときにこのeffectが走って更新される。分位境界は層ごとに別物なので、
+    // 隠れている層へ今の quantileEdges を適用してはいけない)。
     map.setPaintProperty(
-      LAYER_FILL,
+      fillLayer,
       'fill-color',
-      buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
+      flowOverlay && !isPref
+        ? buildFlowFillColor(flowOverlay.entries, flowOverlay.selfCode, flowOverlay.selfRate)
+        : buildFillColorExpression(metric, bedFunction, quantileEdges, demandYear)
     );
     // 「算出不可」の破線レイヤは 'ratio'(need=0) と yoy指標(見込量2025/実績2024が0)
     // のときだけ意味を持つ。実績/必要数の実数指標でも、需要指標（基準年が全区域で
     // 0でないことをPython側で検証済み — 算出不可の区域はそもそも存在しない）でも
-    // 非表示にする。
+    // 非表示にする。yoy指標のキーは構想区域層にしか無いが、フィルタ自体は
+    // 表示中の層(unavailableLayer)にだけ適用するので都道府県層には影響しない。
     const unavailableKey = isYoyMetric(metric)
       ? metric === 'yoy_plan_vs_actual'
         ? yoyPlanRatioKey(bedFunction)
         : yoyChangeRatioKey(bedFunction)
       : `r_${bedFunction}`;
-    map.setFilter(LAYER_UNAVAILABLE_OUTLINE, ['!', ['has', unavailableKey]]);
+    map.setFilter(unavailableLayer, ['!', ['has', unavailableKey]]);
+
+    // 排他表示。level==='area' のときだけ県境(LAYER_PREF_BORDER)を区域の塗りの
+    // 上に重ねる。level==='pref' では県境は塗りの白縁(LAYER_PREF_OUTLINE)が
+    // 担うので重ねない。
+    const areaVisibility = isPref ? 'none' : 'visible';
+    const prefVisibility = isPref ? 'visible' : 'none';
+    for (const layerId of [LAYER_COAST_CASING, LAYER_FILL, LAYER_OUTLINE]) {
+      map.setLayoutProperty(layerId, 'visibility', areaVisibility);
+    }
+    for (const layerId of [LAYER_PREF_COAST_CASING, LAYER_PREF_FILL, LAYER_PREF_OUTLINE]) {
+      map.setLayoutProperty(layerId, 'visibility', prefVisibility);
+    }
+    map.setLayoutProperty(LAYER_PREF_BORDER, 'visibility', isPref ? 'none' : 'visible');
+
+    // 「算出不可」の破線レイヤは 'ratio' と yoy指標の選択時のみ意味を持つ（need=0や
+    // 見込量2025/実績2024が0で比が算出不可の区域を示す）。実績/必要数の実数指標でも、
+    // 需要指標（基準年が全区域で0でないことをPython側で検証済み — 算出不可の区域は
+    // そもそも存在しない）でも非表示にする。表示していない層の破線は常に非表示にする。
+    // 流入出オーバーレイ中は塗りが指標と無関係になるため、こちらも隠す。
+    const showUnavailable = (metric === 'ratio' || isYoyMetric(metric)) && !useFlowFill;
     map.setLayoutProperty(
       LAYER_UNAVAILABLE_OUTLINE,
       'visibility',
-      metric === 'ratio' || isYoyMetric(metric) ? 'visible' : 'none'
+      showUnavailable && !isPref ? 'visible' : 'none'
     );
-  }, [bedFunction, metric, quantileEdges, demandYear, ready]);
+    map.setLayoutProperty(
+      LAYER_PREF_UNAVAILABLE_OUTLINE,
+      'visibility',
+      showUnavailable && isPref ? 'visible' : 'none'
+    );
+  }, [bedFunction, metric, quantileEdges, demandYear, level, ready, flowOverlay]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -501,6 +723,27 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       selectedAreaCode ? ['==', ['get', 'area_code'], selectedAreaCode] : NO_MATCH_FILTER
     );
   }, [selectedAreaCode, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    map.setFilter(
+      LAYER_PREF_SELECTED_OUTLINE,
+      selectedPrefCode ? ['==', ['get', 'pref_code'], selectedPrefCode] : PREF_NO_MATCH_FILTER
+    );
+  }, [selectedPrefCode, ready]);
+
+  // 表示単位を切り替えた瞬間に、直前の層に対するホバー状態(ツールチップと
+  // ホバー輪郭)を消す。切替はボタン操作なのでカーソルは地図の外にあり、
+  // mousemove が追加で発火しないまま「区域のツールチップだけが都道府県表示の
+  // 上に残る」ことがある。
+  useEffect(() => {
+    const map = mapRef.current;
+    setHover(null);
+    if (!map || !ready) return;
+    map.setFilter(LAYER_HOVER_OUTLINE, NO_MATCH_FILTER);
+    map.setFilter(LAYER_PREF_HOVER_OUTLINE, PREF_NO_MATCH_FILTER);
+  }, [level, ready]);
 
   // 選択区域の医療機関ポイント。ソース自体はスタイル定義時に空の
   // FeatureCollectionで一度だけ追加済みなので、ここではsetData()で中身だけ
@@ -514,6 +757,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const source = map.getSource(FACILITIES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     source?.setData(facilityPoints);
   }, [facilityPoints, ready]);
+
+  // ツールチップ用の area_code -> rate 参照表。flowOverlayが変わったときだけ
+  // 組み直す(ホバーのたびに再構築しない)。
+  const flowRateLookup = useMemo(() => {
+    if (!flowOverlay) return null;
+    return buildFlowRateLookup(flowOverlay.entries, flowOverlay.selfCode, flowOverlay.selfRate);
+  }, [flowOverlay]);
 
   useImperativeHandle(
     ref,
@@ -539,7 +789,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   return (
     <div className="map-container-wrap">
-      <div ref={containerRef} className="map-container" role="application" aria-label="構想区域の病床マップ" />
+      <div
+        ref={containerRef}
+        className="map-container"
+        role="application"
+        aria-label={level === 'pref' ? '都道府県の病床マップ' : '構想区域の病床マップ'}
+      />
       {initError && <div className="map-overlay map-overlay-error">{initError}</div>}
       {!initError && loading && <div className="map-overlay">地図データを読み込み中…</div>}
       {!initError && runtimeError && (
@@ -553,11 +808,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           <div>{formatFacilityTooltipBody(hover.props)}</div>
         </div>
       )}
-      {hover && !initError && hover.kind === 'area' && (
+      {hover && !initError && hover.kind === 'pref' && (
         <div className="tooltip" style={{ left: hover.x, top: hover.y }}>
-          <div className="tooltip-title">
-            {hover.props.pref_name} {hover.props.area_name}
-          </div>
+          <div className="tooltip-title">{hover.props.pref_name}</div>
           <div>
             {formatHoverTooltip(
               hover.props as unknown as Record<string, unknown>,
@@ -568,6 +821,26 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               demandYearLabel,
               demandCategoryLabels
             )}
+          </div>
+        </div>
+      )}
+      {hover && !initError && hover.kind === 'area' && (
+        <div className="tooltip" style={{ left: hover.x, top: hover.y }}>
+          <div className="tooltip-title">
+            {hover.props.pref_name} {hover.props.area_name}
+          </div>
+          <div>
+            {flowOverlay && flowRateLookup
+              ? formatFlowTooltipBody(hover.props.area_code, flowOverlay, flowRateLookup)
+              : formatHoverTooltip(
+                  hover.props as unknown as Record<string, unknown>,
+                  metric,
+                  bedFunction,
+                  functionLabel,
+                  demandYear,
+                  demandYearLabel,
+                  demandCategoryLabels
+                )}
           </div>
         </div>
       )}

@@ -81,7 +81,7 @@ zip自身のSHA-256: `0889fa8fe48daf719b41bed45edb7dd29b952e16fdf25853264c14d3cf
 | area_yoy_diff.csv | 構想区域別 病床数の年度間比較（見込量2025(R6)・実績2025(R7)・実績2024(R6) 等、339区域×5機能=1,695行） | area_beds.csv・area_bed_report_rate.csv・area_basic.csv・prefecture_beds.csv | `python tools/verify_yoy_R6_R7.py`（`doc/YOY_VERIFICATION.md`も同時生成） |
 | area_yoy_R6_R7.json | 構想区域別 病床数の年度間比較の可視化サイト表示用データセット（見込量2025(R6)・実績2025(R7)・実績2024(R6)、339区域） | area_beds.csv・area_bed_report_rate.csv・area_boundaries_R7.geojson | `python tools/build_web_yoy.py` |
 
-`prefecture_*.csv`・`area_beds.csv`・`area_bed_report_rate.csv`・`area_basic.csv` はいずれも `published_fy` 列（`R7`/`R6`）でR7・R6を1本のCSVに並存させている（M7）。突合の結論は `doc/YOY_VERIFICATION.md`（`tools/verify_yoy_R6_R7.py` が生成）にまとめてある。`area_basic.csv` はR6行のみ `net_flow_rate` 列（「（一般病床患者流出入）」、値域-0.893〜0.434）を持ち、R7行のみの `outflow_rate`/`inflow_rate`（推計流出/流入患者割合、値域0〜1）とは別概念のため並べて比較・可視化してはならない（詳細は `CLAUDE.md`「パース時の注意」参照）。
+`prefecture_*.csv`・`area_beds.csv`・`area_bed_report_rate.csv`・`area_basic.csv` はいずれも `published_fy` 列（`R7`/`R6`）でR7・R6を1本のCSVに並存させている（M9）。突合の結論は `doc/YOY_VERIFICATION.md`（`tools/verify_yoy_R6_R7.py` が生成）にまとめてある。`area_basic.csv` はR6行のみ `net_flow_rate` 列（「（一般病床患者流出入）」、値域-0.893〜0.434）を持ち、R7行のみの `outflow_rate`/`inflow_rate`（推計流出/流入患者割合、値域0〜1）とは別概念のため並べて比較・可視化してはならない（詳細は `CLAUDE.md`「パース時の注意」参照）。
 
 加工内容の要点（詳細はファイル内 `metadata.processing` または `.meta.json` の `processing` 参照）:
 

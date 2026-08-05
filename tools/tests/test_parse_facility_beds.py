@@ -499,9 +499,15 @@ def test_min_and_max_facility_count_areas(parsed):
 def test_area_code_matches_area_basic(parsed):
     import csv
 
+    # area_basic.csvはR6/R7がpublished_fyで並存する(M9)ため、facility_basic.csv
+    # (R7のみのファイル001723127.xlsx由来)と突き合わせるにはR7行だけに絞り込む
+    # (pref_name/area_nameの値自体はR6/R7で同一だが、辞書の後勝ちでR6行に依存
+    # する状態を避ける)。
     reference = {}
     with open(PROCESSED_DIR / "area_basic.csv", encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
+            if row["published_fy"] != "R7":
+                continue
             reference[row["area_code"]] = (row["pref_name"], row["area_name"])
 
     area_codes = {r["area_code"] for r in parsed.basic_rows}

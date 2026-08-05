@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAreaIndex,
   buildAreaMap,
+  buildPrefectureMap,
   computeBBox,
   demandRatioKey as mjsDemandRatioKey,
   demandValueKey as mjsDemandValueKey,
@@ -67,7 +68,7 @@ function makeDemandData(areas: Array<Record<string, unknown>>) {
   };
 }
 
-// Minimal fixture for area_yoy_R6_R7.json's areas[] (M7). high_acute's
+// Minimal fixture for area_yoy_R6_R7.json's areas[] (M9). high_acute's
 // plan_2025/actual_2024 default to 0 to exercise the 分母0→キー省略 path
 // (real data: 70/339 areas have this for 高度急性期 — see YOY_RATIO_BIN_EDGES
 // comment in metrics.ts).
@@ -336,7 +337,7 @@ describe('buildAreaMap', () => {
     expect(() => buildAreaMap(boundaries, indicators, demand, yoy)).toThrow();
   });
 
-  // ---- YoY (R6→R7 公表年度間比較, M7) ---------------------------------------
+  // ---- YoY (R6→R7 公表年度間比較, M9) ---------------------------------------
 
   it('adds flat YoY raw-value properties (always present) for every function', () => {
     const boundaries = { features: [makePolygonFeature('0001')] };
@@ -462,5 +463,166 @@ describe('buildAreaIndex', () => {
     const boundaries = { features: [makePolygonFeature('0001')] };
     const [entry] = buildAreaIndex(boundaries);
     expect(Object.keys(entry).sort()).toEqual(['area_code', 'bb_e', 'bb_n', 'bb_s', 'bb_w', 'boundary_source']);
+  });
+});
+
+// ---- buildPrefectureMap (概観レイヤ) ---------------------------------------
+//
+// 区域側と同じフラットなプロパティ名(a_/n_/r_<機能>・demandValueKey/
+// demandRatioKey)を出すことを固定する。ここがずれると、地図の色が
+// 片方の層でだけ静かに無色になる(CLAUDE.md「可視化実装で判明した罠」10と同型)。
+
+function makePrefecture(pref_code: string, overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    pref_code,
+    pref_name: `Pref ${pref_code}`,
+    area_count: 3,
+    population_2020: 100000,
+    area_km2: 456.7,
+    population_2024: 99000,
+    population_2040: 88000,
+    beds: {
+      total: { actual_2025: 1000, need_2025: 800 },
+      high_acute: { actual_2025: 100, need_2025: 0 },
+      acute: { actual_2025: 400, need_2025: 300 },
+      recovery: { actual_2025: 300, need_2025: 300 },
+      chronic: { actual_2025: 200, need_2025: 200 },
+    },
+    demand: {
+      home_care: { '2024': 1000, '2030': 1100, '2040': 1200 },
+      outpatient: { '2024': 2000, '2030': 1900, '2040': 1800 },
+    },
+    ...overrides,
+  };
+}
+
+function makePrefectureIndicators(prefectures: Array<Record<string, unknown>>) {
+  return {
+    categories: ['home_care', 'outpatient'],
+    years: [2024, 2030, 2040],
+    baseline_year: 2024,
+    prefectures,
+  };
+}
+
+function makePrefFeature(pref_code: string) {
+  return {
+    type: 'Feature',
+    properties: {
+      pref_code,
+      pref_name: `Pref ${pref_code}`,
+      boundary_source: 'test',
+    },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [130, 30],
+          [131, 30],
+          [131, 31],
+          [130, 31],
+          [130, 30],
+        ],
+      ],
+    },
+  };
+}
+
+describe('buildPrefectureMap', () => {
+  it('emits the same flat bed property names as buildAreaMap', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')])
+    );
+    const props = out.features[0].properties;
+
+    expect(props.pref_code).toBe('01');
+    expect(props.pref_name).toBe('Pref 01');
+    expect(props.boundary_source).toBe('test');
+    expect(props.a_total).toBe(1000);
+    expect(props.n_total).toBe(800);
+    expect(props.r_total).toBeCloseTo(1000 / 800);
+    // 区域固有のキーは持たない
+    expect(props.area_code).toBeUndefined();
+    expect(props.area_name).toBeUndefined();
+  });
+
+  it('omits r_<fn> when need_2025 is 0 (same rule as buildAreaMap)', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')])
+    );
+    const props = out.features[0].properties;
+    expect(props.a_high_acute).toBe(100);
+    expect(props.n_high_acute).toBe(0);
+    expect('r_high_acute' in props).toBe(false);
+  });
+
+  it('emits demand value/ratio keys under the shared key functions', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')])
+    );
+    const props = out.features[0].properties;
+
+    expect(props[mjsDemandValueKey('home_care', 2040)]).toBe(1200);
+    expect(props[mjsDemandRatioKey('home_care', 2040)]).toBeCloseTo(1200 / 1000);
+    expect(props[tsDemandValueKey('outpatient', 2030)]).toBe(1900);
+    expect(props[tsDemandRatioKey('outpatient', 2030)]).toBeCloseTo(1900 / 2000);
+    // 基準年は定義上ちょうど1.0
+    expect(props[mjsDemandRatioKey('home_care', 2024)]).toBe(1);
+  });
+
+  it('attaches the feature bbox', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01')])
+    );
+    const props = out.features[0].properties;
+    expect([props.bb_w, props.bb_s, props.bb_e, props.bb_n]).toEqual([130, 30, 131, 31]);
+  });
+
+  it('preserves the boundary feature order', () => {
+    const out = buildPrefectureMap(
+      { features: [makePrefFeature('02'), makePrefFeature('01')] },
+      makePrefectureIndicators([makePrefecture('01'), makePrefecture('02')])
+    );
+    expect(out.features.map((f) => f.properties.pref_code)).toEqual(['02', '01']);
+  });
+
+  it('throws when the pref_code sets differ', () => {
+    expect(() =>
+      buildPrefectureMap(
+        { features: [makePrefFeature('01'), makePrefFeature('02')] },
+        makePrefectureIndicators([makePrefecture('01')])
+      )
+    ).toThrow(/pref_code sets differ/);
+  });
+
+  it('throws when a demand year is missing rather than emitting NaN', () => {
+    const broken = makePrefecture('01', {
+      demand: {
+        home_care: { '2024': 1000, '2030': 1100 }, // 2040 欠落
+        outpatient: { '2024': 2000, '2030': 1900, '2040': 1800 },
+      },
+    });
+    expect(() =>
+      buildPrefectureMap({ features: [makePrefFeature('01')] }, makePrefectureIndicators([broken]))
+    ).toThrow(/demand\.home_care\[2040\]/);
+  });
+
+  it('throws when beds for a function are missing rather than emitting undefined', () => {
+    const broken = makePrefecture('01', {
+      beds: {
+        total: { actual_2025: 1000, need_2025: 800 },
+        high_acute: { actual_2025: 100, need_2025: 0 },
+        acute: { actual_2025: 400, need_2025: 300 },
+        recovery: { actual_2025: 300, need_2025: 300 },
+        // chronic 欠落
+      },
+    });
+    expect(() =>
+      buildPrefectureMap({ features: [makePrefFeature('01')] }, makePrefectureIndicators([broken]))
+    ).toThrow(/beds\.chronic/);
   });
 });

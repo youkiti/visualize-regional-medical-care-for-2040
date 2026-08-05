@@ -5,7 +5,7 @@
 (`area_boundaries_R7.geojson`、area_codeの一致検証にのみ使用しジオメトリは
 読まない)から生成する。
 
-M7チャンク3。フロントエンド(`web/`配下)は別チャンクで扱うため、本スクリプトは
+M9チャンク3。フロントエンド(`web/`配下)は別チャンクで扱うため、本スクリプトは
 `web/`配下には一切触れない。病床指標の正本(`tools/build_web_data.py` /
 `data/processed/area_indicators_R7.json`)・需要推計の正本
 (`tools/build_web_demand.py` / `data/processed/area_demand_R7.json`)も

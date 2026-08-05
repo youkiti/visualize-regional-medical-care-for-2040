@@ -154,9 +154,15 @@ def test_area_code_and_names_match_area_basic(home_care_result, outpatient_resul
     そのまま書き出すため、在宅シート側だけをarea_basic.csvと突合しても
     外来シート側の名称のずれを検知できない。
     """
+    # area_basic.csvはR6/R7がpublished_fyで並存する(M9)ため、demand_forecast.csv
+    # (R7のみのファイル001728462.xlsx由来)と突き合わせるにはR7行だけに絞り込む
+    # (pref_name/area_nameの値自体はR6/R7で同一だが、辞書の後勝ちでR6行に依存
+    # する状態を避ける)。
     reference = {}
     with open(PROCESSED_DIR / "area_basic.csv", encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
+            if row["published_fy"] != "R7":
+                continue
             reference[row["area_code"]] = (row["pref_name"], row["area_name"])
 
     for result in (home_care_result, outpatient_result):

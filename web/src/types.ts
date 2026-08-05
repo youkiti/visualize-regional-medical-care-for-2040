@@ -239,7 +239,7 @@ export interface AreaDemandData {
 
 // ---- YoY (R6→R7 公表年度間比較) (area_yoy_R6_R7.json / generated/area_yoy.json) --
 //
-// Mirrors data/processed/area_yoy_R6_R7.json (tools/build_web_yoy.py, M7).
+// Mirrors data/processed/area_yoy_R6_R7.json (tools/build_web_yoy.py, M9).
 // Deliberately NOT reusing AreaIndicators*/AreaDemand*/FacilitySummary* above
 // — this dataset's metadata has yet another shape (CLAUDE.md「可視化実装で
 // 判明した罠」11): `source` is an array of exactly 2 entries (R7 then R6,
@@ -453,7 +453,7 @@ export interface FacilitySummaryData {
 // summary of a data/processed/*_R7.json source of truth like those are; it
 // describes two independently-built build artifacts (the ZIP bundle under
 // web/public/downloads/ and the standalone boundaries GeoJSON copy) plus the
-// 13 CSVs packed into the ZIP, so its shape has nothing in common with the
+// 15 CSVs packed into the ZIP, so its shape has nothing in common with the
 // others (no `source`/`processing`/`known_issues` metadata block at all).
 
 /** download_manifest.json の `bundle`: 加工済みCSV一括ダウンロードZIP本体の説明。 */
@@ -463,7 +463,7 @@ export interface DownloadManifestBundle {
   sha256: string;
   /** ZIP内の総エントリ数（CSV + 各.meta.json + README.md + MANIFEST.tsv）。 */
   entry_count: number;
-  /** ZIP内のCSV本数（14）。entry_countとは別に持つ: UIの「CSV14本＋…」表記に使う。 */
+  /** ZIP内のCSV本数（16）。entry_countとは別に持つ: UIの「CSV16本＋…」表記に使う。 */
   csv_count: number;
 }
 
@@ -488,3 +488,215 @@ export interface DownloadManifest {
   boundaries: DownloadManifestBoundaries;
   members: DownloadManifestMember[];
 }
+
+// ---- Patient flow (area_flow_R7.json / public/flow/area_flow.json) --------
+//
+// Mirrors data/processed/area_flow_R7.json (tools/build_web_flow.py). Fetched
+// on demand (web/src/lib/flowData.ts), not bundled — see the design note in
+// web/scripts/sync-data.mjs's "5b. web/public/flow/area_flow.json" step.
+// Deliberately NOT reusing AreaIndicators*/AreaDemand*/FacilitySummary* above
+// (CLAUDE.md 罠11 — a new 表示用JSON never matches an existing metadata
+// shape): here `source_sheet` is an array (2 sheets: 流入率/流出率, like
+// AreaDemandSource) but `original_title` is a single string (unlike
+// AreaDemandSource, where it's an array) — yet another distinct combination,
+// confirmed against the actual generated JSON rather than assumed from a
+// sibling type. `processing.caveat` is an object keyed by the two input CSVs
+// (patient_flow/patient_flow_total), matching neither AreaIndicatorsProcessing
+// (single string) nor AreaDemandProcessing's two keys (different names).
+
+export type FlowDirectionKey = 'inflow' | 'outflow';
+export type FlowPhaseKey = 'acute' | 'comprehensive' | 'chronic';
+
+export const FLOW_DIRECTIONS: FlowDirectionKey[] = ['inflow', 'outflow'];
+export const FLOW_PHASES: FlowPhaseKey[] = ['acute', 'comprehensive', 'chronic'];
+
+/** [相手区域コード, 率(0〜1)] のタプル。率の降順・自区域を除く（build_web_flow.pyが保証）。 */
+export type FlowPartner = [string, number];
+
+export interface FlowPhaseGroup {
+  /** 自区域内完結の率。原典に自区域行が無いグループはself_rankとともにnull（12グループで実際にnull）。 */
+  self_rate: number | null;
+  /** self_rateの構想区域内の順位(1始まり)。self_rateがnullのときは同様にnull。 */
+  self_rank: number | null;
+  partners: FlowPartner[];
+  /** このグループ内でvalue_status=='error'（原典のExcelエラー値'#VALUE!'）だった行数。0または1。 */
+  value_error_count: number;
+}
+
+export interface AreaFlowEntry {
+  area_code: string;
+  flows: Record<FlowDirectionKey, { overall_rate: number; phases: Record<FlowPhaseKey, FlowPhaseGroup> }>;
+}
+
+export interface AreaFlowSource {
+  name: string;
+  publisher: string;
+  url: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  /** 配列（原典シートが2枚: 流入率・流出率）。AreaDemandSource.source_sheetと同形。 */
+  source_sheet: string[];
+  acquired_date: string;
+  license: string;
+  /** 単一文字列（AreaDemandSource.original_titleは配列だが、こちらは違う — 罠11参照）。 */
+  original_title: string;
+  original_notes: string[];
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+export interface AreaFlowProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 入力CSV2本ぶんのcaveat（AreaIndicatorsProcessing.caveatの単一文字列とも
+   * AreaDemandProcessing.caveatの2キー(demand_forecast/demand_population)とも
+   * キー名が異なる）。 */
+  caveat: { patient_flow: string; patient_flow_total: string };
+}
+
+export interface AreaFlowMetadata {
+  title: string;
+  source: AreaFlowSource;
+  processing: AreaFlowProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface AreaFlowData {
+  metadata: AreaFlowMetadata;
+  directions: FlowDirectionKey[];
+  direction_labels: Record<FlowDirectionKey, string>;
+  phases: FlowPhaseKey[];
+  phase_labels: Record<FlowPhaseKey, string>;
+  /** 339構想区域の配列（area_code昇順）。 */
+  areas: AreaFlowEntry[];
+}
+
+
+// ---- Prefecture overview layer (prefecture_indicators_R7.json /
+// generated/prefecture_indicators.json / generated/pref_map.json) -----------
+//
+// Mirrors data/processed/prefecture_indicators_R7.json
+// (tools/build_web_prefecture.py). Deliberately NOT reusing AreaIndicators*/
+// AreaDemand* above — this dataset's metadata has yet another shape (CLAUDE.md
+// 「可視化実装で判明した罠」11):
+//   - TWO source blocks, `source_beds` (R7/001722915.xlsx由来) と
+//     `source_demand` (R7/001728462.xlsx由来)。`source` という単一キーは無い
+//   - `processing.caveat` は3キー（beds/demand_forecast/demand_population）。
+//     AreaIndicators側は単一文字列、AreaDemand側は2キー、Facility側は4キーで、
+//     どれとも違う
+//   - 病床と需要が1つのオブジェクトに同居する（区域側は2ファイルに分かれている）
+//
+// 値の由来の差も型コメントとして残す: 病床は厚労省の都道府県別公表値そのもの、
+// 需要と人口(population_2024/2040)は構想区域から本リポジトリが合計した派生値
+// （known_issues の prefecture_demand_aggregated_by_this_repository）。
+
+export interface PrefectureBeds {
+  actual_2025: number;
+  need_2025: number;
+}
+
+/** 1都道府県（または全国）ぶんの指標。national と prefectures[] で同じ形。 */
+export interface PrefectureIndicator {
+  /** ゼロ埋め2桁。全国は '00'（national のみ）。 */
+  pref_code: string;
+  pref_name: string;
+  /** その都道府県に属する構想区域の数（全国は339）。 */
+  area_count: number;
+  population_2020: number;
+  area_km2: number;
+  /** 医療需要推計の基準人口。**構想区域の合計（派生値）**。 */
+  population_2024: number;
+  /** 2040年人口。**構想区域の合計（派生値）**。 */
+  population_2040: number;
+  /** 厚労省の都道府県別公表値そのもの（構想区域の合計と完全一致することを検証済み）。 */
+  beds: Record<BedFunctionKey, PrefectureBeds>;
+  /** category -> { year（文字列キー） -> レセプト件数/月 }。**構想区域の合計（派生値）**。 */
+  demand: Record<DemandCategoryKey, Record<string, number>>;
+}
+
+/** 病床側（R7/001722915.xlsx由来）と需要側（R7/001728462.xlsx由来）で同じキー集合を持つ出典ブロック。 */
+export interface PrefectureSource {
+  name: string;
+  publisher: string;
+  url: string;
+  page_url: string;
+  fiscal_year: string;
+  source_file: string;
+  source_sha256: string;
+  source_sheet: string;
+  acquired_date: string;
+  license: string;
+  original_title: string;
+  original_notes: string[];
+  derived_via: Array<{ csv: string; meta: string }>;
+}
+
+export interface PrefectureProcessing {
+  script: string;
+  inputs: Array<{ path: string; sha256: string }>;
+  steps: string[];
+  /** 3キー。病床側2CSVは注記が同一なので beds 1本にまとめてある。 */
+  caveat: { beds: string; demand_forecast: string; demand_population: string };
+}
+
+export interface PrefectureIndicatorsMetadata {
+  title: string;
+  /** `source` ではなく2ブロックに分かれている（上のコメント参照）。 */
+  source_beds: PrefectureSource;
+  source_demand: PrefectureSource;
+  processing: PrefectureProcessing;
+  fields: Record<string, string>;
+  known_issues: KnownIssue[];
+}
+
+export interface PrefectureIndicatorsData {
+  metadata: PrefectureIndicatorsMetadata;
+  functions: BedFunctionKey[];
+  function_labels: Record<BedFunctionKey, string>;
+  categories: DemandCategoryKey[];
+  category_labels: Record<DemandCategoryKey, string>;
+  years: number[];
+  year_labels: Record<string, string>;
+  baseline_year: number;
+  /** 全国（pref_code='00'）。境界を持たないため prefectures[] とは分けられている。 */
+  national: PrefectureIndicator;
+  /** 47都道府県（pref_codeの昇順）。全国は含まない。 */
+  prefectures: PrefectureIndicator[];
+}
+
+/**
+ * Flat properties of a single feature in generated/pref_map.json.
+ * a_/n_/r_<機能> と需要のキーは area_map.json と同名（web/src/lib/metrics.ts の
+ * readMetricValue/readDemandValue がどちらの層でもそのまま使える）。区域固有の
+ * area_code/area_name は持たない。
+ */
+export interface PrefectureMapFeatureProperties {
+  pref_code: string;
+  pref_name: string;
+  boundary_source: string;
+  a_total: number;
+  n_total: number;
+  r_total?: number;
+  a_high_acute: number;
+  n_high_acute: number;
+  r_high_acute?: number;
+  a_acute: number;
+  n_acute: number;
+  r_acute?: number;
+  a_recovery: number;
+  n_recovery: number;
+  r_recovery?: number;
+  a_chronic: number;
+  n_chronic: number;
+  r_chronic?: number;
+  bb_w: number;
+  bb_s: number;
+  bb_e: number;
+  bb_n: number;
+}
+
+/** 地図の表示単位。'area'=339構想区域（主表示）、'pref'=47都道府県（概観）。 */
+export type MapLevel = 'pref' | 'area';

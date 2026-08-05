@@ -904,7 +904,7 @@ tr.facility-detail-row td {
   margin: 4px 0 0 0;
 }
 
-/* 年度間比較テーブル（区域パネル、M7）。6列（病床機能＋数値5列）を
+/* 年度間比較テーブル（区域パネル、M9）。6列（病床機能＋数値5列）を
    width: 100% で幅360pxのパネルに押し込むと数値が詰まって読めなくなる
    （罠22）ため、bulk-download-table/facility-tableと同じ扱いで
    width: max-content にし、はみ出しは横スクロールへ逃がす。 */
@@ -936,4 +936,225 @@ table.yoy-table td:first-child {
 table.yoy-table thead th {
   color: var(--color-text-secondary);
   font-weight: 600;
+}
+
+/* 患者の流入・流出（FlowPanel、医療機関一覧の直前）。幅360pxのサイドパネルに
+   収まるよう、横棒はコンテナ幅に対する相対幅にしてmax-width:100%で明示的に
+   縛り、トグルボタンはflex-wrapで2行になっても崩れないようにする
+   （CLAUDE.md罠15・罠22と同種の失敗を避ける）。 */
+.flow-subnote {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  margin: 0 0 8px 0;
+}
+
+.flow-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.flow-toggle-group button {
+  font-size: 0.74rem;
+  padding: 3px 9px;
+  border: 1px solid var(--color-rule);
+  border-radius: 999px;
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flow-toggle-group button:hover {
+  background: #eeeeea;
+}
+
+.flow-toggle-group button[aria-pressed='true'] {
+  background: #184f95;
+  border-color: #184f95;
+  color: #fff;
+}
+
+.flow-overall {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 2px 0;
+}
+
+.flow-note {
+  font-size: 0.7rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  margin: 2px 0 8px 0;
+}
+
+/* 「自区域内で完結」行は棒を伴うため、ラベル行(.flow-self-row)＋棒を縦積みにする
+   専用のブロックにしている。「表示分以外」行(.flow-remainder-row)は棒を持たない
+   ため、これまでどおり単独で罫線・paddingを持つ（D1修正で分離）。 */
+.flow-self-block {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.flow-self-row,
+.flow-remainder-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.78rem;
+}
+
+.flow-remainder-row {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.flow-inline-note {
+  color: var(--color-text-tertiary);
+  font-size: 0.7rem;
+  margin-left: 3px;
+}
+
+.flow-partner-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+}
+
+.flow-partner-row {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.flow-partner-row-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.76rem;
+}
+
+.flow-partner-bar-track {
+  width: 100%;
+  max-width: 100%;
+  height: 6px;
+  background: #eeeeea;
+  border-radius: 3px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.flow-partner-bar-fill {
+  height: 100%;
+  max-width: 100%;
+  background: #184f95;
+  border-radius: 3px;
+}
+
+/* 自区域内で完結の棒（D1修正）。相手区域行と同じ絶対スケールを保ったまま、
+   自区域の行だと分かるよう既存の連続配色ランプ(SEQUENTIAL_RAMP_COLORS)の
+   最も濃い色を再利用する（新しい色を増やさない）。 */
+.flow-partner-bar-fill-self {
+  background: #0d366b;
+}
+
+.flow-partner-empty {
+  font-size: 0.76rem;
+  color: var(--color-text-tertiary);
+  padding: 4px 0;
+}
+
+.flow-toggle-more {
+  font-size: 0.72rem;
+  padding: 3px 8px;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: var(--color-panel-bg);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  margin: 4px 0;
+}
+
+.flow-toggle-more:hover {
+  background: #eeeeea;
+}
+
+.flow-download-button {
+  margin-top: 8px;
+}
+
+/* 表示単位トグル（都道府県／構想区域）。.controls-group の中に入るので、
+   フォントサイズ等は既存の .controls button を引き継ぐ。選択中は塗り分けの
+   青系ではなく中立の濃色にして、地図の配色（発散7色）と混同させない。 */
+.controls-legend {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.level-toggle {
+  display: inline-flex;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.controls .level-toggle-button {
+  border: none;
+  border-radius: 0;
+  padding: 4px 10px;
+  background: white;
+  cursor: pointer;
+}
+
+.controls .level-toggle-button + .level-toggle-button {
+  border-left: 1px solid var(--color-rule);
+}
+
+.controls .level-toggle-button.is-active {
+  background: #3c4650;
+  color: white;
+  font-weight: 600;
+}
+
+/* 全国（参考）の折りたたみ。都道府県パネルの中で、県の数字より一段弱く見せる。 */
+.national-reference {
+  margin: 0 0 12px 0;
+  font-size: 0.82rem;
+}
+
+.national-reference summary {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+
+/* 「この値は本サイトが合計した派生値」の注記。原典どおりの値と取り違えられると
+   まずいので、.boundary-note と同じ中立の注記色で値のすぐ下に置く。 */
+.derived-note {
+  font-size: 0.76rem;
+  color: var(--color-text-secondary);
+  background: #f2f1ec;
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
+.drilldown-button {
+  display: block;
+  width: 100%;
+  margin: 0 0 12px 0;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  background: white;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.drilldown-button:hover {
+  background: #f2f1ec;
 }

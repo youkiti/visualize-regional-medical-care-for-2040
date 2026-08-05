@@ -155,7 +155,7 @@ def _r7_source(meta: dict, label: str) -> dict:
     """`<csv>.meta.json` の `source` から published_fy=='R7' の要素を返す。
 
     `area_basic.csv`・`area_beds.csv`・`prefecture_beds.csv` はR6/R7が
-    published_fy で並存するようになった(M7)ため、`source` が単一のdictでは
+    published_fy で並存するようになった(M9)ため、`source` が単一のdictでは
     なくリストになっている。このスクリプトはR7限定の検証・レポートなので、
     R7の出典情報だけを取り出す。
     """
@@ -176,7 +176,7 @@ def load_area_basic():
     """
     with open(AREA_BASIC_CSV, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
-    # area_basic.csv はR6/R7が published_fy で並存するようになった(M7)。
+    # area_basic.csv はR6/R7が published_fy で並存するようになった(M9)。
     # このスクリプトはR7の構想区域とA38二次医療圏の突合を検証するものなので、
     # 対象とするR7行のみを読む(R6行を含めるとarea_codeが重複してしまう)。
     rows = [r for r in rows if r["published_fy"] == "R7"]
@@ -235,7 +235,7 @@ def load_area_boundaries_metadata(path: Path = AREA_BOUNDARIES_GEOJSON) -> dict:
 def load_beds_csv(path: Path):
     """病床数CSV(`area_beds.csv` / `prefecture_beds.csv`)を読み、dictのリストで返す。
 
-    両CSVともR6/R7が published_fy で並存するようになった(M7)。このスクリプトは
+    両CSVともR6/R7が published_fy で並存するようになった(M9)。このスクリプトは
     R7の構想区域と都道府県の集計整合のみを検証するものなので、対象とするR7行の
     みを返す(R6行が混ざると集計値もキー数も変わってしまう)。
     """
@@ -462,7 +462,7 @@ def build_report_markdown(
     新旧面積整合等の検証済み実測値を持つ)。
     """
     # area_basic.csv・area_beds.csv・prefecture_beds.csv はR6/R7が並存するように
-    # なった(M7)ため source がリストになっている。このレポートはR7限定の検証
+    # なった(M9)ため source がリストになっている。このレポートはR7限定の検証
     # なので、R7の出典情報だけを取り出す。
     area_source = _r7_source(area_meta, "area_basic.csv")
     area_beds_source = _r7_source(area_beds_meta, "area_beds.csv")
@@ -918,7 +918,7 @@ def build_and_write(out_dir: Path, doc_dir: Path) -> dict:
     join_tuples = [tuple(row[h] if row[h] != "" else None for h in join_header) for row in join_rows]
 
     today = datetime.date.today().isoformat()
-    # area_basic.csv は source がリストになった(M7)ため、R7の出典情報だけを取り出す
+    # area_basic.csv は source がリストになった(M9)ため、R7の出典情報だけを取り出す
     # (area_geo_join.csv自体はR7限定のデータセットであり、この出力形は従来どおり
     # 単一のdictを保つ)。
     area_source_r7 = _r7_source(area_meta, "area_basic.csv")
