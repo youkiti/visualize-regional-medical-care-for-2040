@@ -6,7 +6,7 @@
 
 **公開サイト**: https://youkiti.github.io/visualize-regional-medical-care-for-2040/
 
-## 提供予定の機能
+## 機能（すべて公開サイトで利用できる）
 
 - **地図表示（3階層）**: 都道府県 → 構想区域（339 の二次医療圏）→ 医療機関ポイントのドリルダウン
 - **可視化する指標**:
@@ -28,10 +28,13 @@
 | `R7/` | 令和7年度公表の生データ（**編集禁止**、ファイル名は厚労省のファイルID） |
 | `R6/` | 令和6年度公表の生データ（**編集禁止**、別添資料名） |
 | `ksj/` | 国土数値情報（国土交通省）のジオデータ（**編集禁止**）。二次医療圏境界（A38）・医療機関位置（P04）。A38 はサイズ超過のため Git 管理外（下記参照） |
-| `tools/` | データ取得・加工スクリプト（`fetch_ksj_geodata.py`・`parse_prefecture_beds.py`・`parse_area_beds.py`・`build_area_boundaries.py`・`verify_area_join.py`・`build_web_data.py` ほか）と共通基盤（`tools/lib/`）・テスト（`tools/tests/`） |
+| `iryojoho/` | 医療情報ネット（医療機能情報提供制度）のオープンデータ（**編集禁止**）。病院・診療所の施設票（2025-06-01 時点）と公式の定義書。付与済み座標の検算と、P04 で位置が定まらない施設への座標源に使う |
+| `mie/` | 三重県の公式資料（**編集禁止**）。構想区域と二次医療圏の区割が異なる唯一の県であり、8構想区域の構成市町を確定するための一次資料 |
+| `tools/` | データ取得・加工スクリプト（`parse_*.py` = Excel 帳票のパース、`build_*.py` = 境界 GeoJSON・表示用データセットの生成、`verify_*.py` = 突合検証）と共通基盤（`tools/lib/`）・テスト（`tools/tests/`） |
 | `SHA256SUMS` | 生データの SHA-256 ハッシュ（完全性検証用） |
-| `doc/` | ドキュメント（[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)） |
+| `doc/` | ドキュメント。[要件定義](doc/REQUIREMENTS.md)・[データ来歴](doc/DATA_SOURCES.md)・[決定記録（医療機関の座標をどこから取るか）](doc/DECISION_FACILITY_COORDINATES.md)と、スクリプトが生成する検証レポート4本（[境界突合](doc/JOIN_VERIFICATION.md)・[年度間比較](doc/YOY_VERIFICATION.md)・[医療機関の名寄せ](doc/FACILITY_LINKAGE.md)・[座標の監査](doc/FACILITY_GEO_AUDIT.md)） |
 | `data/processed/` | 加工済みデータ（構想区域境界 GeoJSON、都道府県別・構想区域別病床数等の CSV/JSON。ファイル内 or 同名 `.meta.json` に由来メタデータ同梱） |
+| `data/reference/` | 公式一次資料から起こした対応表（三重県8構想区域の構成市町。`mie/` の PDF が出典） |
 | `web/` | 可視化サイト本体（Vite + React + MapLibre GL）。`data/processed/` を正本として `npm run dev`/`build` 時に表示用データ（一括ダウンロード用 ZIP を含む）を自動生成する |
 
 ## 可視化サイトをローカルで動かす
@@ -97,4 +100,5 @@ npm run dev
 - [x] R6公表分の①②を出力対象化し、R6→R7の年度間比較を検証・実装（`tools/verify_yoy_R6_R7.py` → [doc/YOY_VERIFICATION.md](doc/YOY_VERIFICATION.md)、`tools/build_web_yoy.py` → `data/processed/area_yoy_R6_R7.json`、画面に「公表年度間の比較（R6→R7）」として追加）
 - [x] 都道府県ぶんの絞り込みCSV（地図に表示中の指標を全47都道府県ぶん／選択都道府県1つの詳細）
 - [x] 都道府県層の年度間比較（`tools/build_web_prefecture_yoy.py` → `data/processed/prefecture_yoy_R6_R7.json`。表示単位トグルが全指標で成立）
-- [x] 医療機関座標の統合（医療情報ネットの公表座標を、国土数値情報P04で位置が定まらない施設への座標源として条件付きで採用。`tools/build_web_facilities.py` → `data/processed/area_facilities_R7.json`。地図に出る座標は10,244件→**10,926件（92.9%）**に増加。判断記録は [doc/DECISION_FACILITY_COORDINATES.md](doc/DECISION_FACILITY_COORDINATES.md)）
+- [x] 医療機関座標の監査（付与済みの座標を医療情報ネットの公表座標と突き合わせ、1km以上食い違う76件は地図に出さない。区域パネルに座標カバレッジを常設表示。`tools/build_facility_geo_audit.py` → [doc/FACILITY_GEO_AUDIT.md](doc/FACILITY_GEO_AUDIT.md)。地図に出る座標は10,244件→10,168件）
+- [x] 医療機関座標の統合（医療情報ネットの公表座標を、国土数値情報P04で位置が定まらない施設への座標源として条件付きで採用。`tools/build_web_facilities.py` → `data/processed/area_facilities_R7.json`。地図に出る座標は10,168件→**10,926件（11,760件中92.9%）**に増加。判断記録は [doc/DECISION_FACILITY_COORDINATES.md](doc/DECISION_FACILITY_COORDINATES.md)）
