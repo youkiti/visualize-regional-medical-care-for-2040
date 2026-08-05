@@ -146,6 +146,128 @@ function makeFacilityLinkageFile(overrides: Partial<Record<string, unknown>> = {
   };
 }
 
+// area_beds.csv / area_basic.csv 等(R7+R6を1本のCSVに並存させるようになった
+// もの)のmeta.jsonは、sourceがdictではなく「published_fy付きdictのリスト」
+// になる(CLAUDE.md「web/scripts/lib/bundle.mjsのsource形式対応」参照)。
+function makeMultiYearFile(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    name: 'area_beds.csv',
+    title: '構想区域別 病床数(実績/見込量/必要数)',
+    rows: 35595,
+    source: [
+      {
+        published_fy: 'R7',
+        name: '②構想区域の病床数等（別添４）',
+        publisher: '厚生労働省',
+        url: 'https://www.mhlw.go.jp/content/10800000/001723349.xlsx',
+        page_url: 'https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html',
+        fiscal_year: '令和7年度（2025年度）',
+        source_file: 'R7/001723349.xlsx',
+        source_sha256: 'f7e0e1495c05f3d3fe7456d9e6250cb639d9f70305b391d7d6ba3d230762eca9',
+        acquired_date: '2026-08-04',
+        license: '厚生労働省ホームページ利用規約',
+      },
+      {
+        published_fy: 'R6',
+        name: '別添４③（構想区域の病床数等の状況）',
+        publisher: '厚生労働省',
+        url: 'https://www.mhlw.go.jp/content/10800000/001723128.zip',
+        source_note: '令和6年度版一括DL zip に同梱(xlsx単体の直リンクではない)',
+        page_url: 'https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html',
+        fiscal_year: '令和6年度',
+        source_file: 'R6/別添４③（構想区域の病床数等の状況）.xlsx',
+        source_sha256: '00407483f48ff03babe92d386aaa6cd6e50305a77083f69a67b58540c50ed0ed',
+        acquired_date: '2026-08-05',
+        license: '厚生労働省ホームページ利用規約',
+      },
+    ],
+    known_issues: [
+      {
+        id: 'area_beds_2024_actual_duplicated_as_2025',
+        summary: 'R7公表分の「2024実績」列が「2025実績」列と全セルで完全に同一な値になっている',
+        evidence: ['R7: 2024実績列と2025実績列が339区域×5機能=1695セル全てで一致'],
+        action: '値は原典どおり出力している(勝手に補正しない)',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+describe('sourceEntries / array-shaped source (R7+R6 CSVs)', () => {
+  const repoUrl = 'https://github.com/youkiti/visualize-regional-medical-care-for-2040';
+
+  it('renders one source block per array element, not just source[0]', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile()] });
+    expect(readme).toContain('### ②構想区域の病床数等（別添４）');
+    expect(readme).toContain('### 別添４③（構想区域の病床数等の状況）');
+  });
+
+  it('shows the published_fy for each array element', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile()] });
+    const lines = readme.split('\n');
+    const r7BlockStart = lines.findIndex((l) => l === '### ②構想区域の病床数等（別添４）');
+    const r6BlockStart = lines.findIndex((l) => l === '### 別添４③（構想区域の病床数等の状況）');
+    expect(r7BlockStart).toBeGreaterThanOrEqual(0);
+    expect(r6BlockStart).toBeGreaterThanOrEqual(0);
+    // The published_fy line should appear within a few lines of each block header.
+    const r7Slice = lines.slice(r7BlockStart, r7BlockStart + 4).join('\n');
+    const r6Slice = lines.slice(r6BlockStart, r6BlockStart + 4).join('\n');
+    expect(r7Slice).toContain('公表年度区分: R7');
+    expect(r6Slice).toContain('公表年度区分: R6');
+  });
+
+  it('lists each element source_file/SHA-256 in its own block', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile()] });
+    expect(readme).toContain('R7/001723349.xlsx');
+    expect(readme).toContain('f7e0e1495c05f3d3fe7456d9e6250cb639d9f70305b391d7d6ba3d230762eca9');
+    expect(readme).toContain('R6/別添４③（構想区域の病床数等の状況）.xlsx');
+    expect(readme).toContain('00407483f48ff03babe92d386aaa6cd6e50305a77083f69a67b58540c50ed0ed');
+  });
+
+  it('lists the CSV under "このZIPでの収録" in both the R7 block and the R6 block', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile()] });
+    const occurrences = readme.split('- このZIPでの収録: area_beds.csv').length - 1;
+    expect(occurrences).toBe(2);
+  });
+
+  it('groups two CSVs that share the same array source (same source_file per year) under one block per year', () => {
+    const secondFile = makeMultiYearFile({
+      name: 'area_bed_report_rate.csv',
+      title: '構想区域別 病床機能報告の報告率',
+      known_issues: undefined,
+    });
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile(), secondFile] });
+    const r7Occurrences = readme.split('### ②構想区域の病床数等（別添４）').length - 1;
+    const r6Occurrences = readme.split('### 別添４③（構想区域の病床数等の状況）').length - 1;
+    expect(r7Occurrences).toBe(1);
+    expect(r6Occurrences).toBe(1);
+    expect(readme).toContain('- このZIPでの収録: area_beds.csv, area_bed_report_rate.csv');
+  });
+
+  it('still renders known_issues for a CSV with an array-shaped source', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeMultiYearFile()] });
+    expect(readme).toContain('area_beds_2024_actual_duplicated_as_2025');
+    expect(readme).not.toContain('[object Object]');
+    expect(readme).not.toContain('undefined');
+  });
+
+  it('a dict-shaped source (legacy CSV, e.g. area_geo_join.csv) still renders correctly alongside an array-shaped one', () => {
+    const readme = buildBundleReadme({ repoUrl, files: [makeDerivedFile(), makeMultiYearFile()] });
+    // makeDerivedFile()'s source is a plain dict with no published_fy — no
+    // "公表年度区分" line should render for its block.
+    const lines = readme.split('\n');
+    const derivedBlockIdx = lines.findIndex((l) =>
+      l.startsWith('### 構想区域(area_basic.csv) × 二次医療圏境界')
+    );
+    expect(derivedBlockIdx).toBeGreaterThanOrEqual(0);
+    const derivedSlice = lines.slice(derivedBlockIdx, derivedBlockIdx + 6).join('\n');
+    expect(derivedSlice).not.toContain('公表年度区分');
+    // The array-shaped file's blocks still render independently.
+    expect(readme).toContain('### ②構想区域の病床数等（別添４）');
+    expect(readme).toContain('公表年度区分: R7');
+  });
+});
+
 describe('buildBundleReadme', () => {
   const repoUrl = 'https://github.com/youkiti/visualize-regional-medical-care-for-2040';
 

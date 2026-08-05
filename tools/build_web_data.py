@@ -23,7 +23,9 @@ package.json等には一切触れない。
   5. UTF-8・LF・`ensure_ascii=False`・indent=2・末尾改行1つで出力する
 
 検証1〜8:
-  1. area_beds.csv の全行が published_fy == 'R7'
+  1. area_beds.csv / area_basic.csv は published_fy == 'R7' の行だけに絞り込んでから
+     以降の検証・抽出を行う(両CSVともR6/R7が published_fy で並存するようになった
+     [M7]ため)。絞り込み後に0行ならSystemExitで中断する
   2. (area_code, bed_function, series, year) に重複がない
   3. area_beds.csv / area_basic.csv / area_boundaries_R7.geojson の area_code
      集合が3つとも完全一致し、要素数がちょうど339
@@ -145,6 +147,34 @@ def _select(d: dict, keys) -> dict:
     return {k: d[k] for k in keys}
 
 
+def _r7_source(meta: dict, label: str) -> dict:
+    """`<csv>.meta.json` の `source` から published_fy=='R7' の要素を返す。
+
+    area_beds.csv・area_basic.csvはR6/R7が published_fy で並存するように
+    なった(M7)ため `source` がリストになっている。本データセット
+    (area_indicators_R7.json)はR7のみで構成されるため、R7の出典情報だけを
+    取り出す。
+    """
+    for entry in meta["source"]:
+        if entry.get("published_fy") == "R7":
+            return entry
+    raise SystemExit(f"{label}: sourceにpublished_fy=='R7'の要素が見つかりません")
+
+
+def _filter_known_issues_for_r7(issues: list) -> list:
+    """`known_issues` から、scope.published_fy が明示的に'R7'以外(=R6行についての
+    既知の欠陥)になっている項目を除外する。published_fyキーが無い項目は両年度に
+    当てはまるため残す。
+
+    area_beds.csv.meta.json・area_basic.csv.meta.json はR6/R7が並存するように
+    なった(M7)ため、R7行のみで構成される本データセットには当てはまらない
+    R6限定の既知欠陥(area_beds_r6_2015_actual_missing_minamihiyama・
+    area_basic_r6_net_flow_rate_different_concept)が混ざっている。画面の
+    出典欄に出すと利用者を誤誘導するため、ここで絞り込む。
+    """
+    return [issue for issue in issues if issue.get("scope", {}).get("published_fy", "R7") == "R7"]
+
+
 def validate_and_index(beds_rows, basic_rows, geo_codes):
     """検証1〜7を行い、違反があれば SystemExit で中断する。
 
@@ -152,10 +182,15 @@ def validate_and_index(beds_rows, basic_rows, geo_codes):
       actual_by_key / need_by_key: {(area_code, bed_function_ja): beds(int)}
       basic_by_code: {area_code: row(dict)}
     """
-    # 検証1: published_fy が全て R7
-    bad_fy = sorted({r["published_fy"] for r in beds_rows} - {"R7"})
-    if bad_fy:
-        raise SystemExit(f"検証1失敗: area_beds.csvにR7以外のpublished_fyがあります: {bad_fy}")
+    # 検証1: published_fy == 'R7' の行だけに絞り込む(area_beds.csv・area_basic.csv
+    # ともにR6/R7が published_fy で並存するようになった[M7]ため、まずこの
+    # データセットが対象とするR7行だけに絞ってから以降の検証・抽出を行う)。
+    beds_rows = [r for r in beds_rows if r["published_fy"] == "R7"]
+    if not beds_rows:
+        raise SystemExit("検証1失敗: area_beds.csvにpublished_fy=='R7'の行がありません")
+    basic_rows = [r for r in basic_rows if r["published_fy"] == "R7"]
+    if not basic_rows:
+        raise SystemExit("検証1失敗: area_basic.csvにpublished_fy=='R7'の行がありません")
 
     # 検証2: (area_code, bed_function, series, year) の重複なし
     key_counts = Counter((r["area_code"], r["bed_function"], r["series"], r["year"]) for r in beds_rows)
@@ -311,8 +346,8 @@ def build_areas(actual_by_key, need_by_key, basic_by_code):
 
 
 def build_metadata(beds_meta: dict, basic_meta: dict, inputs: list) -> dict:
-    beds_source = _select(beds_meta["source"], SOURCE_KEYS)
-    basic_source = _select(basic_meta["source"], SOURCE_KEYS)
+    beds_source = _select(_r7_source(beds_meta, "area_beds.csv.meta.json"), SOURCE_KEYS)
+    basic_source = _select(_r7_source(basic_meta, "area_basic.csv.meta.json"), SOURCE_KEYS)
     if beds_source != basic_source:
         raise SystemExit(
             "area_beds.csv.meta.json と area_basic.csv.meta.json の source が一致しません"
@@ -334,7 +369,9 @@ def build_metadata(beds_meta: dict, basic_meta: dict, inputs: list) -> dict:
         {"csv": "data/processed/area_basic.csv", "meta": "data/processed/area_basic.csv.meta.json"},
     ]
 
-    known_issues = list(beds_meta.get("known_issues", [])) + list(basic_meta.get("known_issues", []))
+    known_issues = _filter_known_issues_for_r7(
+        list(beds_meta.get("known_issues", [])) + list(basic_meta.get("known_issues", []))
+    )
     known_issues.append(
         {
             "id": "area_indicators_2024_actual_excluded",
@@ -360,7 +397,8 @@ def build_metadata(beds_meta: dict, basic_meta: dict, inputs: list) -> dict:
             "inputs": inputs,
             "steps": [
                 "area_beds.csv・area_basic.csv・area_boundaries_R7.geojsonを読み込み",
-                "area_beds.csvの全行がpublished_fy=='R7'であることを確認(検証1)",
+                "area_beds.csv・area_basic.csvをpublished_fy=='R7'の行だけに絞り込み"
+                "(絞り込み後に0行ならSystemExitで中断。検証1)",
                 "(area_code, bed_function, series, year)の重複がないことを確認(検証2)",
                 "3ファイルのarea_code集合が完全一致し339件であることを確認(検証3)",
                 "各area_code×5機能について実績2025・必要数2025がちょうど1行ずつ"
@@ -378,6 +416,9 @@ def build_metadata(beds_meta: dict, basic_meta: dict, inputs: list) -> dict:
                 "の場合はoutflow_rate/inflow_rateをnullにし、flow_rate_unavailableへ"
                 "原典値をそのまま保持('XXX'を0として扱うことはしない)",
                 "area_codeの昇順(文字列ソート)でareasを整列",
+                "known_issues(area_beds.csv.meta.json・area_basic.csv.meta.json)のうち、"
+                "scope.published_fyが'R7'以外(R6行についての既知欠陥)を除外した"
+                "(本データセットはR7行のみで構成されるため)",
             ],
             "caveat": beds_caveat,
         },

@@ -6,10 +6,10 @@
 // vitest (web/src/lib/bundle.test.ts) and reused from web/scripts/sync-data.mjs.
 
 /** ZIP内のルートフォルダ名。全エントリはこの下に置く（展開すると1フォルダにまとまる）。 */
-export const BUNDLE_ROOT = 'chiiki-iryo-koso_processed-csv_R7';
+export const BUNDLE_ROOT = 'chiiki-iryo-koso_processed-csv_R6_R7';
 
 /** web/public/downloads/ に書き出すZIPファイル名。 */
-export const BUNDLE_FILE_NAME = 'chiiki-iryo-koso_processed-csv_R7.zip';
+export const BUNDLE_FILE_NAME = 'chiiki-iryo-koso_processed-csv_R6_R7.zip';
 
 // data/processed/ にある加工済みCSV13本を明示的に列挙する（ディレクトリを走査
 // して拾うのではなく、この配列を正とする）。sync-data.mjs はこの配列と実際の
@@ -67,41 +67,69 @@ export function buildManifestTsv(members) {
 
 /**
  * @typedef {{
+ *   published_fy?: string,
+ *   name: string,
+ *   publisher?: string,
+ *   source_file?: string,
+ *   source_sha256?: string,
+ *   page_url?: string,
+ *   acquired_date?: string,
+ *   license?: string,
+ *   inputs?: BundleSourceInput[],
+ * }} BundleSourceEntry
+ */
+
+/**
+ * @typedef {{
  *   name: string,
  *   title: string,
  *   rows: number,
- *   source: {
- *     name: string,
- *     publisher?: string,
- *     source_file?: string,
- *     source_sha256?: string,
- *     page_url?: string,
- *     acquired_date?: string,
- *     license?: string,
- *     inputs?: BundleSourceInput[],
- *   },
+ *   source: BundleSourceEntry | BundleSourceEntry[],
  *   known_issues?: Array<{ id: string, summary: string, action: string, evidence?: unknown[] }>,
  * }} BundleCsvInfo
  */
 
 /**
+ * `file.source` を常に配列として扱うためのヘルパ。単一の出典を持つCSV
+ * （dict形式、従来からの形）は1要素の配列に包む。複数年度の出典を持つCSV
+ * （area_beds.csv等、`published_fy` 付きのdictのリスト。CLAUDE.md参照）は
+ * そのまま返す。
+ *
+ * @param {BundleCsvInfo['source']} source
+ * @returns {BundleSourceEntry[]}
+ */
+function sourceEntries(source) {
+  return Array.isArray(source) ? source : [source];
+}
+
+/**
  * 原典（source_fileがある場合はそれ、無い場合はsource.name）でCSVをグルーピング
  * する。同じ原典を共有する複数CSVは1つの出典ブロックにまとめる。出現順を保つ。
  *
+ * `source` が配列（複数の公表年度を持つCSV）の場合、各要素をそれぞれ1つの
+ * 原典として扱う（`source[0]` だけを見て済ませない）。そのCSVは年度の数だけ
+ * 複数の出典ブロックに登場しうる（例: area_beds.csvはR7ブロックとR6ブロックの
+ * 両方の「このZIPでの収録」に載る）。年度ごとに`source_file`が異なるため、
+ * グルーピングキー自体は自然に年度ごとに分かれる。
+ *
  * @param {BundleCsvInfo[]} files
- * @returns {Array<{ source: BundleCsvInfo['source'], members: string[] }>}
+ * @returns {Array<{ source: BundleSourceEntry, members: string[] }>}
  */
 function groupBySource(files) {
-  /** @type {Map<string, { source: BundleCsvInfo['source'], members: string[] }>} */
+  /** @type {Map<string, { source: BundleSourceEntry, members: string[] }>} */
   const groups = new Map();
   for (const file of files) {
-    const key = file.source.source_file ?? `derived::${file.source.name}`;
-    let group = groups.get(key);
-    if (!group) {
-      group = { source: file.source, members: [] };
-      groups.set(key, group);
+    for (const entry of sourceEntries(file.source)) {
+      const key = entry.source_file ?? `derived::${entry.name}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = { source: entry, members: [] };
+        groups.set(key, group);
+      }
+      if (!group.members.includes(file.name)) {
+        group.members.push(file.name);
+      }
     }
-    group.members.push(file.name);
   }
   return [...groups.values()];
 }
@@ -173,6 +201,7 @@ export function buildBundleReadme(input) {
     const { source, members } = group;
     lines.push(`### ${source.name}`);
     lines.push('');
+    if (source.published_fy) lines.push(`- 公表年度区分: ${source.published_fy}`);
     if (source.publisher) lines.push(`- 公表元: ${source.publisher}`);
     if (source.source_file && source.source_sha256) {
       lines.push(`- 原典ファイル: ${source.source_file}（SHA-256: ${source.source_sha256}）`);

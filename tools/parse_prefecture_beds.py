@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """厚労省「①都道府県の病床数等」(R7: 001722915.xlsx / R6: 別添４②)の帳票Excel
-を tidy CSV へ変換する。
+を tidy CSV へ変換する。R7・R6の両方を出力対象とし、1本のCSVに
+`published_fy` で年度を並存させる。
 
 処理内容:
   1. `verify_source()` で元データのSHA-256を `SHA256SUMS` と照合(改変検知)
@@ -11,7 +12,10 @@
      (下記「R6との列ずれ」参照)ためハードコードしない
   4. 全48ブロックのサブヘッダー行が先頭ブロックと完全一致することを検証し、
      不一致ならレイアウト変更とみなして例外で中断する(取りこぼし防止)
-  5. 3つの tidy CSV + 由来メタデータ(`<csv名>.meta.json`)を `data/processed/`
+  5. `--source`(既定'all'=R7+R6)で指定した各年度をパースし、行はR7を先に・
+     R6を後に固定した順で連結する(R7部分がバイト単位で不変になり、
+     `git diff` で「R6の行が末尾に増えた」ことだけが読めるようにするため)
+  6. 3つの tidy CSV + 由来メタデータ(`<csv名>.meta.json`)を `data/processed/`
      に出力する
        - prefecture_beds.csv: 病床数(実績/見込量/必要数 × 5機能 × 年)
        - prefecture_bed_report_rate.csv: 病床機能報告の報告率
@@ -30,7 +34,7 @@
 必要環境: Python 3.11+, openpyxl
 
 使い方:
-    python tools/parse_prefecture_beds.py [--source R7]
+    python tools/parse_prefecture_beds.py [--source all|R7|R6]
 """
 import argparse
 import datetime
@@ -58,9 +62,7 @@ from tools.lib.codes import normalize_pref_code
 from tools.lib.layout import LayoutMismatchError, expect, expect_int
 from tools.lib.provenance import REPO_ROOT, verify_source, write_csv_with_meta
 
-# 各公表年度の元データ設定。将来 R6 の出力にも対応できるよう両方定義して
-# おくが、CLI(--source)では現時点で R7 のみ受け付ける(R6 出力は未対応、
-# パース自体はテストから `load_sheet("R6")` で直接利用できる)。
+# 各公表年度の元データ設定。R7・R6の両方をCLI(--source)から出力できる。
 SOURCES = {
     "R7": {
         # R7のシートX1セルの表記(「別添４」)に合わせる。R6の「別添４②」を
@@ -76,13 +78,19 @@ SOURCES = {
         "name": "別添４②（都道府県の病床数等の状況）",
         "path_in_repo": "R6/別添４②（都道府県の病床数等の状況）.xlsx",
         "sheet_name": "都道府県別必要量との比較",
-        # R6は令和6年度版一括DL(001723128.zip)からの取得と推定(doc/DATA_SOURCES.md参照)。
-        # R6出力は今回未対応のためmeta.jsonには使わない。
-        "download_url": None,
+        # xlsx単体の直リンクではなく、令和6年度版一括DL zip に同梱されている
+        # (doc/DATA_SOURCES.md「R6/」節参照。zip自身のSHA-256は
+        # `tools/verify_r6_bundle.py` で検証済み)。
+        "download_url": "https://www.mhlw.go.jp/content/10800000/001723128.zip",
+        "source_note": "令和6年度版一括DL zip に同梱(xlsx単体の直リンクではない)",
         "fiscal_year": "令和6年度",
-        "acquired_date": None,
+        "acquired_date": "2026-08-05",
     },
 }
+
+# 出力行の順序(build_and_write()で常にこの順に固定する。--sourceの指定順に
+# 依らない。理由はモジュールdocstring参照)。
+SOURCE_ORDER = ["R7", "R6"]
 
 SOURCE_PAGE_URL = "https://www.mhlw.go.jp/stf/seisakunitsuite/bunya/0000080850_00014.html"
 LICENSE_NOTE = (
@@ -109,7 +117,8 @@ PREF_CODE_DESC = (
 )
 PREF_NAME_DESC = "都道府県名(全国の行は'全国')"
 PUBLISHED_FY_DESC = (
-    "公表年度を表す識別子。'R7'=令和7年度公表分。将来R6等の行を追加する際のキー"
+    "公表年度を表す識別子。'R7'=令和7年度公表分、'R6'=令和6年度公表分。"
+    "行の出典はmeta.jsonのsource配列をpublished_fyで引くこと"
 )
 
 FIELDS_BEDS = {
@@ -329,35 +338,65 @@ def _rows_to_tuples(rows, header):
     return [tuple(r[h] for h in header) for r in rows]
 
 
-def build_and_write(source_key: str, out_dir: Path) -> dict:
-    """指定ソースをパースし、3つのCSV+meta.jsonを `out_dir` へ出力する。
+ROW_ORDER_STEP = (
+    "複数の公表年度(--source)を対象にする場合、行はR7を先に・R6を後に固定した"
+    "順で連結する(R7部分をバイト単位で不変に保ち、差分でR6の追加だけが読めるようにするため)"
+)
+
+
+def build_and_write(source_keys, out_dir: Path) -> dict:
+    """指定ソース(複数可)をパースし、3つのCSV+meta.jsonを `out_dir` へ出力する。
+
+    `source_keys` は `SOURCES` のキー("R7"/"R6")の列挙(順不同で渡してよい)。
+    出力行は指定順に関わらず常に `SOURCE_ORDER`(R7→R6)の順に固定する。
 
     書き出したCSVパスの辞書({"beds": ..., "report_rate": ..., "basic": ...})
     を返す(再現性テスト等での再利用を想定)。
     """
     out_dir = Path(out_dir)
-    ws, cfg, source_sha256 = load_sheet(source_key)
-    result = parse_sheet(ws, published_fy=source_key)
-    print(
-        f"[ok] パース完了: beds={len(result.beds_rows)}行 "
-        f"report_rate={len(result.report_rate_rows)}行 basic={len(result.basic_rows)}行"
-    )
+    ordered_keys = [k for k in SOURCE_ORDER if k in source_keys]
+    if not ordered_keys:
+        raise ValueError(f"source_keys が空、または未知のキーを含みます: {source_keys!r}")
+
+    results = []
+    sources = []
+    for key in ordered_keys:
+        ws, cfg, source_sha256 = load_sheet(key)
+        result = parse_sheet(ws, published_fy=key)
+        print(
+            f"[ok] パース完了({key}): beds={len(result.beds_rows)}行 "
+            f"report_rate={len(result.report_rate_rows)}行 basic={len(result.basic_rows)}行"
+        )
+        results.append(result)
+
+        source_entry = {
+            "published_fy": key,
+            "name": cfg["name"],
+            "publisher": "厚生労働省",
+            "url": cfg["download_url"],
+        }
+        if cfg.get("source_note"):
+            source_entry["source_note"] = cfg["source_note"]
+        source_entry.update(
+            {
+                "page_url": SOURCE_PAGE_URL,
+                "fiscal_year": cfg["fiscal_year"],
+                "source_file": cfg["path_in_repo"],
+                "source_sha256": source_sha256,
+                "source_sheet": cfg["sheet_name"],
+                "acquired_date": cfg["acquired_date"],
+                "license": LICENSE_NOTE,
+                "original_title": result.title,
+                "original_notes": result.notes,
+            }
+        )
+        sources.append(source_entry)
+
+    beds_rows = [row for result in results for row in result.beds_rows]
+    report_rate_rows = [row for result in results for row in result.report_rate_rows]
+    basic_rows = [row for result in results for row in result.basic_rows]
 
     today = datetime.date.today().isoformat()
-    base_source = {
-        "name": cfg["name"],
-        "publisher": "厚生労働省",
-        "url": cfg["download_url"],
-        "page_url": SOURCE_PAGE_URL,
-        "fiscal_year": cfg["fiscal_year"],
-        "source_file": cfg["path_in_repo"],
-        "source_sha256": source_sha256,
-        "source_sheet": cfg["sheet_name"],
-        "acquired_date": cfg["acquired_date"],
-        "license": LICENSE_NOTE,
-        "original_title": result.title,
-        "original_notes": result.notes,
-    }
 
     beds_header = [
         "published_fy",
@@ -371,37 +410,43 @@ def build_and_write(source_key: str, out_dir: Path) -> dict:
     beds_csv, _ = write_csv_with_meta(
         out_dir / "prefecture_beds.csv",
         beds_header,
-        _rows_to_tuples(result.beds_rows, beds_header),
+        _rows_to_tuples(beds_rows, beds_header),
         title="都道府県別 病床数(実績/見込量/必要数)",
-        source=base_source,
+        source=sources,
         processing={
             "script": "tools/parse_prefecture_beds.py",
             "date": today,
             "steps": STEPS_COMMON
-            + ["派生比率列(2025年必要数に対する比等)は再計算可能なため出力対象から除外"],
+            + [
+                "派生比率列(2025年必要数に対する比等)は再計算可能なため出力対象から除外",
+                ROW_ORDER_STEP,
+            ],
             "caveat": CAVEAT,
         },
         fields=FIELDS_BEDS,
     )
-    print(f"[ok] 出力: {beds_csv} ({len(result.beds_rows)}行)")
+    print(f"[ok] 出力: {beds_csv} ({len(beds_rows)}行)")
 
     rate_header = ["published_fy", "pref_code", "pref_name", "year", "report_rate"]
     rate_csv, _ = write_csv_with_meta(
         out_dir / "prefecture_bed_report_rate.csv",
         rate_header,
-        _rows_to_tuples(result.report_rate_rows, rate_header),
+        _rows_to_tuples(report_rate_rows, rate_header),
         title="都道府県別 病床機能報告の報告率",
-        source=base_source,
+        source=sources,
         processing={
             "script": "tools/parse_prefecture_beds.py",
             "date": today,
             "steps": STEPS_COMMON
-            + ["各ブロックの（報告率）行から実績年の値のみを抽出(見込量・必要数列は報告率を持たない)"],
+            + [
+                "各ブロックの（報告率）行から実績年の値のみを抽出(見込量・必要数列は報告率を持たない)",
+                ROW_ORDER_STEP,
+            ],
             "caveat": CAVEAT,
         },
         fields=FIELDS_REPORT_RATE,
     )
-    print(f"[ok] 出力: {rate_csv} ({len(result.report_rate_rows)}行)")
+    print(f"[ok] 出力: {rate_csv} ({len(report_rate_rows)}行)")
 
     basic_header = [
         "published_fy",
@@ -415,9 +460,9 @@ def build_and_write(source_key: str, out_dir: Path) -> dict:
     basic_csv, _ = write_csv_with_meta(
         out_dir / "prefecture_basic.csv",
         basic_header,
-        _rows_to_tuples(result.basic_rows, basic_header),
+        _rows_to_tuples(basic_rows, basic_header),
         title="都道府県別 基礎情報(2020年人口・面積)",
-        source=base_source,
+        source=sources,
         processing={
             "script": "tools/parse_prefecture_beds.py",
             "date": today,
@@ -425,12 +470,13 @@ def build_and_write(source_key: str, out_dir: Path) -> dict:
             + [
                 "人口(万人)を10000倍し四捨五入して人単位に変換(population_2020)。原典値は population_2020_source_value に保持",
                 "面積の浮動小数点誤差を除くため小数2桁に丸め(area_2020_km2)",
+                ROW_ORDER_STEP,
             ],
             "caveat": CAVEAT,
         },
         fields=FIELDS_BASIC,
     )
-    print(f"[ok] 出力: {basic_csv} ({len(result.basic_rows)}行)")
+    print(f"[ok] 出力: {basic_csv} ({len(basic_rows)}行)")
 
     return {"beds": beds_csv, "report_rate": rate_csv, "basic": basic_csv}
 
@@ -439,14 +485,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--source",
-        choices=["R7"],
-        default="R7",
-        help="対象の公表年度データ(現時点はR7のみ。R6は将来対応)",
+        choices=["R7", "R6", "all"],
+        default="all",
+        help="対象の公表年度データ('all'=R7+R6の両方(既定)、'R7'/'R6'=単独)",
     )
     args = ap.parse_args()
 
+    source_keys = ["R7", "R6"] if args.source == "all" else [args.source]
     out_dir = REPO_ROOT / "data" / "processed"
-    build_and_write(args.source, out_dir)
+    build_and_write(source_keys, out_dir)
 
 
 if __name__ == "__main__":
